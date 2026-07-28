@@ -1,0 +1,56 @@
+[tool.ruff]
+line-length = 88
+extend-exclude = [
+    "**/migrations/**",
+    "**/__pycache__/**",
+    ".venv/",
+    "venv/",
+    ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+    "node_modules/",
+    "static/",
+    "media/",
+]
+
+[tool.ruff.lint]
+ignore = ["E501"]
+select = [
+    "E", # pycodestyle
+    "F", # Pyflakes
+    "UP", # pyupgrade
+    "B", # flake8-bugbear
+    "SIM", # flake8-simplify
+    "I", # isort
+    "C", # flake8-comprehensions
+#    "D", # pydocstyle # TODO
+#    "D100",  # module
+#     "D101",  # class
+#     "D102",  # method
+#     "D103",  # function
+]
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "D100",
+    "D103",
+    "D104",
+    "D200",  # One-line docstring should fit on one line
+    "D205",  # Blank line between summary and description
+    "D400",  # First line should end with a period
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.flake8-quotes]
+docstring-quotes = "double"
+inline-quotes = "single"
+multiline-quotes = "double"
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+pythonpath = ["scr"]
