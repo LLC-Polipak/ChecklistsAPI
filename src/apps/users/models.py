@@ -3,67 +3,53 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 
-class CustomUserManager(BaseUserManager["User"]):
+class CustomUserManager(BaseUserManager):
     """
-    Кастомный менеджер для модели пользователя (Паттерн: Factory Method).
+    Кастомный менеджер для создания пользователей.
     """
 
-    def create_user(
-        self, email: str, password: str | None = None, **extra_fields: dict
-    ) -> "User":
+    def create_user(self, email, password=None, **extra_fields):
         if not email:
-            raise ValueError(_("Email is required"))
+            raise ValueError(_('У пользователя должен быть email'))
+
         email = self.normalize_email(email)
         user = self.model(email=email, **extra_fields)
         user.set_password(password)
         user.save(using=self._db)
         return user
 
-    def create_superuser(
-        self, email: str, password: str | None = None, **extra_fields: dict
-    ) -> "User":
-        extra_fields.setdefault("is_staff", True)
-        extra_fields.setdefault("is_superuser", True)
-        extra_fields.setdefault("role", User.Role.ADMIN)
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('is_active', True)
 
-        if extra_fields.get("is_staff") is not True:
-            raise ValueError(_("Superuser must have is_staff=True."))
-        if extra_fields.get("is_superuser") is not True:
-            raise ValueError(_("Superuser must have is_superuser=True."))
+        if extra_fields.get('is_staff') is not True:
+            raise ValueError(
+                _('Суперпользователь должен иметь is_staff=True.'))
+        if extra_fields.get('is_superuser') is not True:
+            raise ValueError(
+                _('Суперпользователь должен иметь is_superuser=True.'))
 
         return self.create_user(email, password, **extra_fields)
 
 
 class User(AbstractUser):
     """
-    Кастомная модель пользователя портала.
+    Кастомная модель пользователя.
     """
-
-    class Role(models.TextChoices):
-        MANAGER = "MANAGER", _("Менеджер")
-        STOREKEEPER = "STOREKEEPER", _("Кладовщик")
-        CLIENT = "CLIENT", _("Клиент (B2B)")
-        ADMIN = "ADMIN", _("Администратор")
 
     username = None
 
-    email = models.EmailField(_("email address"), unique=True)
+    email = models.EmailField(_('email address'), unique=True)
 
-    role = models.CharField(_("Роль"), max_length=20, choices=Role.choices, default=Role.CLIENT)
-
-    USERNAME_FIELD = "email"
+    USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
 
     objects = CustomUserManager()
 
-    manager = models.ForeignKey(
-        "self",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="subordinates",
-        verbose_name="Руководитель",
-    )
+    class Meta:
+        verbose_name = 'Пользователь'
+        verbose_name_plural = 'Пользователи'
 
-    def __str__(self) -> str:
-        return f"{self.email} - {self.get_role_display()}"
+    def __str__(self):
+        return self.email
