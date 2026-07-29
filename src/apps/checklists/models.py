@@ -4,6 +4,9 @@ from django.db import models
 class Template(models.Model):
     """
     Главная модель шаблона
+
+    Определяет набор полей, которые необходимо заполнить
+    при выполнении осмотра, приемки или сдачи оборудования.
     """
 
     class ChecklistType(models.TextChoices):
@@ -11,12 +14,10 @@ class Template(models.Model):
         ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
         HANDOVER = 'HANDOVER', 'Сдача'
 
-    equipment_id = models.CharField('UID-оборудования',
-                                    max_length=255,
-                                    db_index=True)
-    checklist_type = models.CharField('Тип чек-листа',
-                                      max_length=50,
-                                      choices=ChecklistType.choices)
+    equipment_id = models.CharField('UID-оборудования', max_length=255, db_index=True)
+    checklist_type = models.CharField(
+        'Тип чек-листа', max_length=50, choices=ChecklistType.choices
+    )
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
 
     class Meta:
@@ -25,12 +26,14 @@ class Template(models.Model):
         verbose_name_plural = 'Шаблоны чек-листов'
 
     def __str__(self):
-        return f"{self.get_checklist_type_display()}({self.equipment_id})"
+        return f'{self.get_checklist_type_display()}({self.equipment_id})'
 
 
 class TemplateField(models.Model):
     """
-    Описывает одно конкретное поле в анкете
+    Описывает одно поле анкеты, его тип и порядок отображения.
+    Для полей с типом ``CHOICE`` список допустимых значений
+    хранится в модели ``FieldChoice``.
     """
 
     class FieldType(models.TextChoices):
@@ -40,13 +43,11 @@ class TemplateField(models.Model):
         CHECKBOX = 'CHECKBOX', 'Чекбокс'
         AUTO = 'AUTO', 'Автозаполняемое значение'
 
-    template = models.ForeignKey(Template,
-                                 on_delete=models.CASCADE,
-                                 related_name='fields')
+    template = models.ForeignKey(
+        Template, on_delete=models.CASCADE, related_name='fields'
+    )
     name = models.CharField('Название поля', max_length=255)
-    field_type = models.CharField('Тип поля',
-                                  max_length=20,
-                                  choices=FieldType.choices)
+    field_type = models.CharField('Тип поля', max_length=20, choices=FieldType.choices)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
 
     class Meta:
@@ -55,18 +56,20 @@ class TemplateField(models.Model):
         verbose_name_plural = 'Поля шаблонов'
 
     def __str__(self):
-        return f"{self.name}({self.get_field_type_display()})"
+        return f'{self.name}({self.get_field_type_display()})'
 
 
 class FieldChoice(models.Model):
     """
-    Используется для вариантов ответов в
-    TemplateField, когда field_type имеет значение CHOICE
+    Допустимое значение для поля типа ``CHOICE``.
+
+    Используется для формирования списка вариантов,
+    доступных пользователю при заполнении чек-листа.
     """
 
-    field = models.ForeignKey(TemplateField,
-                              on_delete=models.CASCADE,
-                              related_name='choices')
+    field = models.ForeignKey(
+        TemplateField, on_delete=models.CASCADE, related_name='choices'
+    )
     value = models.CharField('Значение варианта', max_length=255)
     order = models.PositiveIntegerField('Порядок вывода', default=0)
 
@@ -76,18 +79,19 @@ class FieldChoice(models.Model):
 
 class ChecklistsResult(models.Model):
     """
-    Заголовок заполненной анкеты
+    Заполненный экземпляр чек-листа.
+
+    Содержит информацию о шаблоне, оборудовании,
+    пользователе и времени заполнения.
+    Ответы на отдельные поля хранятся
+    в связанных объектах ``ChecklistAnswer``.
     """
 
-    template = models.ForeignKey(Template,
-                                 on_delete=models.PROTECT,
-                                 related_name='results')
-    equipment_uid = models.CharField('UID Оборудования',
-                                     max_length=255,
-                                     db_index=True)
-    user_uid = models.CharField('UID Пользователя',
-                                max_length=255,
-                                db_index=True)
+    template = models.ForeignKey(
+        Template, on_delete=models.PROTECT, related_name='results'
+    )
+    equipment_uid = models.CharField('UID Оборудования', max_length=255, db_index=True)
+    user_uid = models.CharField('UID Пользователя', max_length=255, db_index=True)
     created_at = models.DateTimeField('Дата заполнения', auto_now_add=True)
 
     class Meta:
@@ -95,20 +99,23 @@ class ChecklistsResult(models.Model):
         verbose_name_plural = 'Результаты чек-листов'
 
     def __str__(self):
-        return f"Отчет {self.template.checklist_type} от {self.user_uid}"
+        return f'Отчет {self.template.checklist_type} от {self.user_uid}'
 
 
 class ChecklistAnswer(models.Model):
     """
-    Ответ на конкретное поле
+    Ответ пользователя на отдельное поле чек-листа.
+
+    Связывает заполненный чек-лист с полем шаблона
+    и хранит введенное пользователем значение.
     """
 
-    result = models.ForeignKey(ChecklistsResult,
-                               on_delete=models.CASCADE,
-                               related_name='answers')
-    field = models.ForeignKey(TemplateField,
-                              on_delete=models.PROTECT,
-                              related_name='answers')
+    result = models.ForeignKey(
+        ChecklistsResult, on_delete=models.CASCADE, related_name='answers'
+    )
+    field = models.ForeignKey(
+        TemplateField, on_delete=models.PROTECT, related_name='answers'
+    )
     value = models.TextField('Текст ответа')
 
     class Meta:
@@ -117,4 +124,4 @@ class ChecklistAnswer(models.Model):
         verbose_name_plural = 'Ответы'
 
     def __str__(self):
-        return f"{self.field.name}:{self.value}"
+        return f'{self.field.name}:{self.value}'
