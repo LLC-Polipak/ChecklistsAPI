@@ -26,8 +26,8 @@ select = [
 #    "D", # pydocstyle # TODO
 #    "D100",  # module
 #     "D101",  # class
-#     "D102",  # method
-#     "D103",  # function
+    "D102",  # method
+    "D103",  # function
 ]
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [

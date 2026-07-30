@@ -19,17 +19,15 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
     'rest_framework',
     'drf_spectacular',
     'drf_spectacular_sidecar',
-
     'apps.checklists',
     'apps.users',
 ]
 
 REST_FRAMEWORK = {
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 SPECTACULAR_SETTINGS = {

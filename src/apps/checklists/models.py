@@ -14,19 +14,19 @@ class Template(models.Model):
         ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
         HANDOVER = 'HANDOVER', 'Сдача'
 
-    equipment_id = models.CharField('UID-оборудования', max_length=255, db_index=True)
+    equipment_uid = models.CharField('UID-оборудования', max_length=255, db_index=True)
     checklist_type = models.CharField(
         'Тип чек-листа', max_length=50, choices=ChecklistType.choices
     )
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
 
     class Meta:
-        unique_together = ('equipment_id', 'checklist_type')
+        unique_together = ('equipment_uid', 'checklist_type')
         verbose_name = 'Шаблон чек-листа'
         verbose_name_plural = 'Шаблоны чек-листов'
 
     def __str__(self):
-        return f'{self.get_checklist_type_display()}({self.equipment_id})'
+        return f'{self.get_checklist_type_display()}({self.equipment_uid})'
 
 
 class TemplateField(models.Model):
