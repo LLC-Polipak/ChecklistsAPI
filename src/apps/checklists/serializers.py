@@ -13,8 +13,8 @@ from .models import (
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
     """
-    Сериализатор вариантов ответов для выпадающего списка.
-    Используется исключительно для полей типа 'Choice.'
+    DTO для вариантов ответов.
+    Используется исключительно для полей типа 'CHOICE' (выпадающий список)
     """
 
     class Meta:
@@ -24,8 +24,8 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
 
 class TemplateFieldSerializer(serializers.ModelSerializer):
     """
-    Сериализатор структуры отдельного поля чек-листа.
-    Обрабатывает вложенные варианты ответов и гарантирует целостность данных.
+    DTO для поля шаблона анкеты.
+    Описывает конкретный вопрос, его тип и возможные варианты ответа (если применимо).
     """
 
     choices = FieldChoiceSerializer(many=True, required=False)
@@ -36,12 +36,8 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """
-        Валидация поля перед сохранением
-
-        Правила:
-        1. Если тип поля 'Choice' -> массив choices обязателен.
-        2. Для любых других типов -> массив choices принудительно очищается,
-            чтобы избежать мусорных данных в БД.
+        Бизнес-валидация: гарантирует что варианты ответов (choices)
+        сохраняются только для поля типа CHOICE. Для остальных типов очищает массив.
         """
 
         field_type = attrs.get('field_type')
@@ -54,18 +50,17 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
                         'choices': 'Для типа "Выбор из списка" необходимо передать хотя бы один вариант ответа.'
                     }
                 )
-            else:
-                if choices:
-                    attrs['choices'] = []
+        else:
+            if choices:
+                attrs['choices'] = []
 
         return attrs
 
 
 class TemplateSerializer(serializers.ModelSerializer):
     """
-    Главный сериализатор для создания шаблонов чек-листов.
-    Принимает комплексный JSON (Шаблон -> Поля -> Варианты выбора)
-        и маршрутизирует данные по таблицам.
+    Записываемый вложенный сериализатор для шаблона.
+    Преобразует глубокий JSON от клиента в нормализованную реляционную структуру БД.
     """
 
     fields = TemplateFieldSerializer(many=True)
@@ -78,9 +73,7 @@ class TemplateSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         """
-        Переопределенный метод создания со строгой транзакционностью.
-        Если произойдет сбой при сохранении любого поля или варианта выбора,
-        создание самого шаблона будет отменено.
+        Атомарно сохраняет заголовок шаблон, его поля и варианты выбора.
         """
 
         fields_data = validated_data.pop('fields', [])
@@ -125,7 +118,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         2. Сверяет ключи присланных ответов с ID полей шаблона, гарантируя,
            что нет пропущенных обязательных полей.
         3. Выполняет Type Casting (приведение типов) на лету: проверяет, является ли
-           строка корректным числом (NUMBER), булевым значением (CHECKBOX) или
+           строка корректным числом (INTEGER), булевым значением (CHECKBOX) или
            существующим вариантом (CHOICE).
 
         Возвращает подготовленный и безопасный список данных для метода create().
@@ -189,7 +182,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                         )
                     )
 
-        validated_answers.append({'field': field, 'value': value})
+            validated_answers.append({'field': field, 'value': value})
 
         attrs['template'] = template
         attrs['validated_answers'] = validated_answers
@@ -217,3 +210,37 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         ChecklistAnswer.objects.bulk_create(answers_to_create)
 
         return result
+
+
+class ChecklistAnswerSerializer(serializers.ModelSerializer):
+    """
+    DTO для вывода конкретного ответа пользователя.
+    Подтягивает названия и типы полей из связанной таблицы для удобства фронтенда.
+    """
+
+    field_name = serializers.CharField(source='field.name')
+    field_type = serializers.CharField(source='field.field_type')
+
+    class Meta:
+        model = ChecklistAnswer
+        fields = ['field_id', 'field_name', 'field_type', 'value']
+
+
+class ChecklistResultListSerializer(serializers.ModelSerializer):
+    """
+    DTO для вывода истории заполненных чек-листов (включая вложенные ответы).
+    """
+
+    checklist_type = serializers.CharField(source='template.checklist_type')
+    answers = ChecklistAnswerSerializer(many=True)
+
+    class Meta:
+        model = ChecklistsResult
+        fields = [
+            'id',
+            'equipment_uid',
+            'user_uid',
+            'checklist_type',
+            'created_at',
+            'answers',
+        ]
