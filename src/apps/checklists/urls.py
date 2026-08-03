@@ -1,13 +1,15 @@
-from django.urls import path
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
 
 from .views import (
-    ChecklistResultAPIView,
-    GenerateChecklistAPIView,
-    TemplateCreateAPIView,
+    ChecklistResultViewSet,
+    TemplateViewSet,
 )
 
+router = DefaultRouter()
+router.register(r'templates', TemplateViewSet, basename='template')
+router.register(r'results', ChecklistResultViewSet, basename='result')
+
 urlpatterns = [
-    path('templates/', TemplateCreateAPIView.as_view(), name='template-create'),
-    path('forms/', GenerateChecklistAPIView.as_view(), name='checklist-form'),
-    path('results/', ChecklistResultAPIView.as_view(), name='checklist-results'),
+    path('', include(router.urls)),
 ]

@@ -77,7 +77,7 @@ class FieldChoice(models.Model):
         return self.value
 
 
-class ChecklistsResult(models.Model):
+class ChecklistResult(models.Model):
     """
     Заполненный экземпляр чек-листа.
 
@@ -111,7 +111,7 @@ class ChecklistAnswer(models.Model):
     """
 
     result = models.ForeignKey(
-        ChecklistsResult, on_delete=models.CASCADE, related_name='answers'
+        ChecklistResult, on_delete=models.CASCADE, related_name='answers'
     )
     field = models.ForeignKey(
         TemplateField, on_delete=models.PROTECT, related_name='answers'

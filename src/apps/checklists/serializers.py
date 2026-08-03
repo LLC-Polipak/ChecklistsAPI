@@ -4,7 +4,7 @@ from rest_framework.exceptions import ValidationError
 
 from .models import (
     ChecklistAnswer,
-    ChecklistsResult,
+    ChecklistResult,
     FieldChoice,
     Template,
     TemplateField,
@@ -32,7 +32,8 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TemplateField
-        fields = ['name', 'field_type', 'order', 'choices']
+        fields = ['id', 'name', 'field_type', 'order', 'choices']
+        read_only_fields = ['id']
 
     def validate(self, attrs):
         """
@@ -94,6 +95,35 @@ class TemplateSerializer(serializers.ModelSerializer):
 
         return template
 
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """
+
+        :param instance:
+        :param validated_data:
+        :return:
+        """
+
+        fields_data = validated_data.pop('fields', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+
+        if fields_data is not None:
+            instance.fields.all().delete()
+            for field_data in fields_data:
+                choices_data = field_data.pop('choices', [])
+                field = TemplateField.objects.create(template=instance, **field_data)
+                if choices_data:
+                    choice_objects = [
+                        FieldChoice(field=field, **c) for c in choices_data
+                    ]
+                    FieldChoice.objects.bulk_create(choice_objects)
+
+        return instance
+
 
 class ChecklistResultCreateSerializer(serializers.Serializer):
     """
@@ -105,9 +135,11 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
     equipment_uid = serializers.CharField(max_length=255)
     user_uid = serializers.CharField(max_length=255)
-    checklist_type = serializers.CharField(max_length=50)
+    checklist_type = serializers.CharField(max_length=50, write_only=True)
 
-    answers = serializers.DictField(child=serializers.CharField(), allow_empty=False)
+    answers = serializers.DictField(
+        child=serializers.CharField(), allow_empty=False, write_only=True
+    )
 
     def validate(self, attrs):
         """
@@ -196,7 +228,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         Создает заголовок результата и привязывает к нему массив ответов (ResultAnswer).
         """
 
-        result = ChecklistsResult.objects.create(
+        result = ChecklistResult.objects.create(
             template=validated_data['template'],
             equipment_uid=validated_data['equipment_uid'],
             user_uid=validated_data['user_uid'],
@@ -210,6 +242,31 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         ChecklistAnswer.objects.bulk_create(answers_to_create)
 
         return result
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        """
+
+        :param instance:
+        :param validated_data:
+        :return:
+        """
+
+        instance.equipment_uid = validated_data.get(
+            'equipment_uid', instance.equipment_uid
+        )
+        instance.user_uid = validated_data.get('user_uid', instance.user_uid)
+        instance.save()
+
+        validated_answers = validated_data.get('validated_answers', None)
+        if validated_answers is not None:
+            for item in validated_answers:
+                ChecklistAnswer.objects.update_or_create(
+                    result=instance,
+                    field=item['field'],
+                    defaults={'value': item['value']},
+                )
+        return instance
 
 
 class ChecklistAnswerSerializer(serializers.ModelSerializer):
@@ -235,7 +292,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     answers = ChecklistAnswerSerializer(many=True)
 
     class Meta:
-        model = ChecklistsResult
+        model = ChecklistResult
         fields = [
             'id',
             'equipment_uid',
