@@ -53,4 +53,8 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.pytest.ini_options]
-pythonpath = ["scr"]
+DJANGO_SETTINGS_MODULE = "config.settings"
+norecursedirs = "env/*"
+testpaths = ["tests", "*_tests.py"]
+python_files = "test_*.py"
+addopts = "-vv -p no:cacheprovider -ss"
