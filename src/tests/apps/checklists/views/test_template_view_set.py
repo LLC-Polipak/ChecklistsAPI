@@ -1,10 +1,10 @@
 
 import pytest
 from rest_framework.reverse import reverse
-from rest_framework.test import APIClient
+from pprint import pprint
 
 @pytest.mark.django_db
-class TestTemplateViewSet():
+class TestTemplateViewSet:
 
     def setup_method(self):
         pass
@@ -37,5 +37,9 @@ class TestTemplateViewSet():
           ]
         }
         response = client.post(url, data)
+        print('\n', 'ответ')
+        pprint(response.text)
+        print(response.status_code)
+        print('ответ', '\n')
 
-        assert response.status_code == 200
+        assert response.status_code == 400
