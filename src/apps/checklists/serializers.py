@@ -75,6 +75,8 @@ class TemplateSerializer(serializers.ModelSerializer):
     fields = TemplateFieldSerializer(many=True)
     checklist_type_display = serializers.CharField(source='get_checklist_type_display', read_only=True)
 
+    has_results = serializers.SerializerMethodField()
+
     class Meta:
         fields = [
             'id',
@@ -82,10 +84,14 @@ class TemplateSerializer(serializers.ModelSerializer):
             'checklist_type_display',
             'checklist_type',
             'created_at',
+            'has_results',
             'fields',
         ]
         model = Template
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'has_results']
+
+    def get_has_results(self, obj):
+        return obj.results.exists()
 
     @transaction.atomic
     def create(self, validated_data):
@@ -114,28 +120,32 @@ class TemplateSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def update(self, instance, validated_data):
         """
+        Атомарно изменяет шаблон, его поля и варианты выбора.
 
-        :param instance:
-        :param validated_data:
-        :return:
+        Если по изменяемому шаблону существует заполненный чек-лист,
+        выкидывает ошибку ValidationError.
         """
+        if instance.results.exists():
+            raise ValidationError(
+                "Невозможно изменить шаблон, так как по нему уже есть заполненные анкеты. "
+                "Создайте новый шаблон."
+            )
 
         fields_data = validated_data.pop('fields', None)
-
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
-
         instance.save()
 
         if fields_data is not None:
             instance.fields.all().delete()
             for field_data in fields_data:
                 choices_data = field_data.pop('choices', [])
-                field = TemplateField.objects.create(template=instance, **field_data)
+                field = TemplateField.objects.create(template=instance,
+                                                     **field_data)
+
                 if choices_data:
-                    choice_objects = [
-                        FieldChoice(field=field, **c) for c in choices_data
-                    ]
+                    choice_objects = [FieldChoice(field=field, **c) for c in
+                                      choices_data]
                     FieldChoice.objects.bulk_create(choice_objects)
 
         return instance
