@@ -29,10 +29,18 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
     """
 
     choices = FieldChoiceSerializer(many=True, required=False)
+    field_type_display = serializers.CharField(source='get_field_type_display', read_only=True)
 
     class Meta:
         model = TemplateField
-        fields = ['id', 'name', 'field_type', 'order', 'choices']
+        fields = [
+            'id',
+            'name',
+            'field_type',
+            'field_type_display',
+            'order',
+            'choices',
+        ]
         read_only_fields = ['id']
 
     def validate(self, attrs):
@@ -65,10 +73,18 @@ class TemplateSerializer(serializers.ModelSerializer):
     """
 
     fields = TemplateFieldSerializer(many=True)
+    checklist_type_display = serializers.CharField(source='get_checklist_type_display', read_only=True)
 
     class Meta:
+        fields = [
+            'id',
+            'equipment_uid',
+            'checklist_type_display',
+            'checklist_type',
+            'created_at',
+            'fields',
+        ]
         model = Template
-        fields = ['id', 'equipment_uid', 'checklist_type', 'created_at', 'fields']
         read_only_fields = ['id', 'created_at']
 
     @transaction.atomic
@@ -278,9 +294,17 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
     field_name = serializers.CharField(source='field.name')
     field_type = serializers.CharField(source='field.field_type')
 
+    field_type_display = serializers.CharField(source='field.get_field_type_display', read_only=True)
+
     class Meta:
         model = ChecklistAnswer
-        fields = ['field_id', 'field_name', 'field_type', 'value']
+        fields = [
+            'field_id',
+            'field_name',
+            'field_type',
+            'field_type_display',
+            'value'
+        ]
 
 
 class ChecklistResultListSerializer(serializers.ModelSerializer):
@@ -289,6 +313,11 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     """
 
     checklist_type = serializers.CharField(source='template.checklist_type')
+    checklist_type_display = serializers.CharField(
+        source='template.get_checklist_type_display',
+        read_only=True
+    )
+
     answers = ChecklistAnswerSerializer(many=True)
 
     class Meta:
@@ -298,6 +327,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'equipment_uid',
             'user_uid',
             'checklist_type',
+            'checklist_type_display',
             'created_at',
-            'answers',
+            'answers'
         ]

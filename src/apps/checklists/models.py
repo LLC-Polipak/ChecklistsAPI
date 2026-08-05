@@ -21,7 +21,6 @@ class Template(models.Model):
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
 
     class Meta:
-        unique_together = ('equipment_uid', 'checklist_type')
         verbose_name = 'Шаблон чек-листа'
         verbose_name_plural = 'Шаблоны чек-листов'
 

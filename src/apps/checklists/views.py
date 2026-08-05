@@ -1,6 +1,7 @@
+from django.db.models import ProtectedError
 from django.views.generic import TemplateView
 from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import viewsets
+from rest_framework import viewsets, status
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
@@ -62,6 +63,26 @@ class TemplateViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
 
         return Response(serializer.data)
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Отвечает за удаление шаблона.
+
+        Returns:
+            HTTP 204: Удаление шаблон прошло успешно.
+            HTTP 400: Если на шаблон есть заполненный чек-лист и его удаление невозможно.
+            HTTP 404: Шаблон с таким параметром не найден.
+        """
+
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return (Response(
+            {
+                    "error": "Невозможно удалить шаблон, так как по нему уже есть заполненные анкеты."
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            ))
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
