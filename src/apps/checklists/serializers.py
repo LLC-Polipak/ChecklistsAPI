@@ -2,13 +2,8 @@ from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from .models import (
-    ChecklistAnswer,
-    ChecklistResult,
-    FieldChoice,
-    Template,
-    TemplateField,
-)
+from apps.checklists.models import ChecklistAnswer, ChecklistResult, \
+    FieldChoice, Template, TemplateField
 
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
@@ -29,7 +24,8 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
     """
 
     choices = FieldChoiceSerializer(many=True, required=False)
-    field_type_display = serializers.CharField(source='get_field_type_display', read_only=True)
+    field_type_display = serializers.CharField(source='get_field_type_display',
+                                               read_only=True)
 
     class Meta:
         model = TemplateField
@@ -52,7 +48,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
         field_type = attrs.get('field_type')
         choices = attrs.get('choices', [])
 
-        if field_type == TemplateField.FieldType.CHOICE:
+        if field_type == TemplateField.FieldTypes.CHOICE:
             if not choices:
                 raise serializers.ValidationError(
                     {
@@ -73,7 +69,8 @@ class TemplateSerializer(serializers.ModelSerializer):
     """
 
     fields = TemplateFieldSerializer(many=True)
-    checklist_type_display = serializers.CharField(source='get_checklist_type_display', read_only=True)
+    checklist_type_display = serializers.CharField(source='get_checklist_type_display',
+                                                   read_only=True)
 
     has_results = serializers.SerializerMethodField()
 
@@ -84,11 +81,13 @@ class TemplateSerializer(serializers.ModelSerializer):
             'checklist_type_display',
             'checklist_type',
             'created_at',
+            'updated_at',
+            'is_deprecated',
             'has_results',
             'fields',
         ]
         model = Template
-        read_only_fields = ['id', 'created_at', 'has_results']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'has_results']
 
     def get_has_results(self, obj):
         return obj.results.exists()
@@ -100,6 +99,14 @@ class TemplateSerializer(serializers.ModelSerializer):
         """
 
         fields_data = validated_data.pop('fields', [])
+        equipment_uid = validated_data.get('equipment_uid')
+        checklist_type = validated_data.get('checklist_type')
+
+        Template.objects.filter(
+            equipment_uid=equipment_uid,
+            checklist_type=checklist_type,
+            is_deprecated=False
+        ).update(is_deprecated=True)
 
         template = Template.objects.create(**validated_data)
 
@@ -136,7 +143,7 @@ class TemplateSerializer(serializers.ModelSerializer):
             setattr(instance, attr, value)
         instance.save()
 
-        if fields_data is not None:
+        if fields_data:
             instance.fields.all().delete()
             for field_data in fields_data:
                 choices_data = field_data.pop('choices', [])
@@ -151,11 +158,25 @@ class TemplateSerializer(serializers.ModelSerializer):
         return instance
 
 
+    def validate_fields(self, value):
+        """
+        Проверяет, что порядковые номера полей не дублируются.
+        """
+
+        orders = [field.get('order') for field in value if
+                  field.get('order') is not None]
+
+        if len(orders) != len(set(orders)):
+            raise serializers.ValidationError(
+                "Порядковые номера полей (order) должны быть уникальными.")
+        return value
+
+
 class ChecklistResultCreateSerializer(serializers.Serializer):
     """
     Сериализатор для принятия и динамической валидации заполненной анкеты.
     Проверяет наличие ответов на все поля.
-    Динамически валидирует типы присланных строковых данных, приводимость к NUMBER,
+    Динамически валидирует типы присланных строковых данных, приводимость к INTEGER,
     допустимость Boolean, наличие значения в списке FieldChoice.
     """
 
@@ -202,50 +223,52 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 f'Пропущены обязательные поля (ID): {",".join(missing_fields)}'
             )
 
+        errors = {}
         validated_answers = []
-        for field_id_str, value in answers_data.items():
-            if field_id_str not in template_fields:
-                raise ValidationError(
-                    f'Поле с ID {field_id_str} не принадлежит этому шаблону.'
-                )
 
-            field = template_fields[field_id_str]
+        for f_id, value in answers_data.items():
+            if f_id not in template_fields:
+                errors[f_id] = "Поле не принадлежит этому шаблону."
+                continue
 
-            if field.field_type == TemplateField.FieldType.INTEGER:
-                if not value.lstrip('-').isdigit():
-                    raise (
-                        ValidationError(
-                            f'Поле "{field.name}" должно быть целым числом.'
-                        )
-                    )
+            field = template_fields[f_id]
+            error_msg = self._validate_single_field(field, value)
 
-            elif field.field_type == TemplateField.FieldType.CHOICE:
-                valid_choices = [c.value for c in field.choices.all()]
-                if value not in valid_choices:
-                    raise (
-                        ValidationError(
-                            {
-                                field_id_str: f'Значение "{value}" недопустимо. Допустимые: {valid_choices}'
-                            }
-                        )
-                    )
+            if error_msg:
+                errors[f_id] = error_msg
+            else:
+                validated_answers.append({'field': field, 'value': value})
 
-            elif field.field_type == TemplateField.FieldType.CHECKBOX:
-                if value.lower() not in ['true', 'false', '1', '0']:
-                    raise (
-                        ValidationError(
-                            {
-                                field_id_str: f'Поле "{field.name}" должно быть логическим (true/false).'
-                            }
-                        )
-                    )
-
-            validated_answers.append({'field': field, 'value': value})
+        if errors:
+            raise ValidationError(errors)
 
         attrs['template'] = template
         attrs['validated_answers'] = validated_answers
 
         return attrs
+
+    @staticmethod
+    def _validate_single_field(self, field, value):
+        """
+        Вспомогательный метод: проверяет одно поле.
+        Возвращает текст ошибки или None.
+        """
+
+        if (field.field_type == TemplateField.FieldType.NUMBER
+                and not value.lstrip(
+                '-').isdigit()):
+            return f"Поле '{field.name}' должно быть целым числом."
+
+        elif field.field_type == TemplateField.FieldType.CHOICE:
+            valid_choices = [c.value for c in field.choices.all()]
+            if value not in valid_choices:
+                return f"Значение '{value}' недопустимо. Варианты: {valid_choices}"
+
+        elif field.field_type == TemplateField.FieldType.CHECKBOX:
+            if value.lower() not in ['true', 'false', '1', '0']:
+                return f"Поле '{field.name}' должно быть логическим (true/false)."
+
+        return None
 
     @transaction.atomic
     def create(self, validated_data):
@@ -256,7 +279,6 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
         result = ChecklistResult.objects.create(
             template=validated_data['template'],
-            equipment_uid=validated_data['equipment_uid'],
             user_uid=validated_data['user_uid'],
         )
 
@@ -272,20 +294,14 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     @transaction.atomic
     def update(self, instance, validated_data):
         """
-
-        :param instance:
-        :param validated_data:
-        :return:
+        Атомарно изменяет заполненный чек-лист, а также его ответы.
         """
 
-        instance.equipment_uid = validated_data.get(
-            'equipment_uid', instance.equipment_uid
-        )
         instance.user_uid = validated_data.get('user_uid', instance.user_uid)
         instance.save()
 
         validated_answers = validated_data.get('validated_answers', None)
-        if validated_answers is not None:
+        if validated_answers:
             for item in validated_answers:
                 ChecklistAnswer.objects.update_or_create(
                     result=instance,
@@ -327,6 +343,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
         source='template.get_checklist_type_display',
         read_only=True
     )
+    equipment_uid = serializers.CharField(source='template.equipment_uid', read_only=True)
 
     answers = ChecklistAnswerSerializer(many=True)
 
@@ -339,5 +356,6 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'checklist_type',
             'checklist_type_display',
             'created_at',
+            'updated_at',
             'answers'
         ]

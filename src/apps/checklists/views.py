@@ -1,16 +1,12 @@
-from django.db.models import ProtectedError
-from django.views.generic import TemplateView
-from drf_spectacular.utils import OpenApiParameter, extend_schema
+from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status
-from rest_framework.permissions import AllowAny
+from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import ChecklistResult, Template
-from .serializers import (
-    ChecklistResultCreateSerializer,
-    ChecklistResultListSerializer,
-    TemplateSerializer,
-)
+from apps.checklists.filters import TemplateFilter, ChecklistResultFilter
+from apps.checklists.models import ChecklistResult, Template
+from apps.checklists.serializers import ChecklistResultCreateSerializer, \
+    ChecklistResultListSerializer, TemplateSerializer
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -20,49 +16,12 @@ class TemplateViewSet(viewsets.ModelViewSet):
     Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
     """
 
-    queryset = Template.objects.all()
+    queryset = Template.objects.filter(is_deprecated=False).prefetch_related(
+        'fields__choices')
     serializer_class = TemplateSerializer
-    permission_classes = [AllowAny]
 
-    @extend_schema(
-        summary='Получить список шаблонов (или один по фильтрам)',
-        parameters=[
-            OpenApiParameter(
-                name='equipment_uid',
-                description='Фильтр по оборудованию',
-                required=False,
-                type=str,
-            ),
-            OpenApiParameter(
-                name='checklist_type',
-                description='Фильтр по типу чек-листа',
-                required=False,
-                type=str,
-            ),
-        ],
-    )
-    def list(self, request, *args, **kwargs):
-        """
-        Извлекает шаблон из БД по параметрам и отдает его структуру.
-
-        Returns:
-            HTTP 200: JSON со структурой полей и вариантами выбора.
-            HTTP 400: Если отсутствуют обязательные query-параметры.
-            HTTP 404: Если шаблон с такими параметрами не найден.
-        """
-        queryset = self.get_queryset()
-
-        equipment_uid = request.query_params.get('equipment_uid')
-        checklist_type = request.query_params.get('checklist_type')
-
-        if equipment_uid:
-            queryset = queryset.filter(equipment_uid=equipment_uid)
-        if checklist_type:
-            queryset = queryset.filter(checklist_type=checklist_type)
-
-        serializer = self.get_serializer(queryset, many=True)
-
-        return Response(serializer.data)
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = TemplateFilter
 
     def destroy(self, request, *args, **kwargs):
         """
@@ -74,15 +33,34 @@ class TemplateViewSet(viewsets.ModelViewSet):
             HTTP 404: Шаблон с таким параметром не найден.
         """
 
-        try:
-            return super().destroy(request, *args, **kwargs)
-        except ProtectedError:
-            return (Response(
-            {
-                    "error": "Невозможно удалить шаблон, так как по нему уже есть заполненные анкеты."
-                },
+        instance = self.get_object()
+
+        if instance.results.exists():
+            return Response(
+                {
+                    "error": "Невозможно удалить шаблон, так как по нему уже есть заполненные анкеты."},
                 status=status.HTTP_400_BAD_REQUEST
-            ))
+            )
+
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
+        """
+        Возвращает историю изменений для данного шаблона.
+        (Находит все устаревшие и текущую версию для этого оборудования и типа).
+        """
+
+        current_template = self.get_object()
+
+        history_queryset = Template.objects.filter(
+            equipment_uid=current_template.equipment_uid,
+            checklist_type=current_template.checklist_type
+        ).prefetch_related('fields__choices').order_by('-created_at')
+
+        serializer = self.get_serializer(history_queryset, many=True)
+
+        return Response(serializer.data)
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -94,10 +72,11 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     - GET: возвращает историю заполненных анкет.
     """
 
-    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
-        'answers__field'
-    )
-    permission_classes = [AllowAny]
+    queryset = ChecklistResult.objects.select_related(
+        'template').prefetch_related('answers__field')
+
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = ChecklistResultFilter
 
     def get_serializer_class(self):
         """
@@ -111,29 +90,3 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update']:
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
-
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(name='equipment_uid', required=False, type=str),
-            OpenApiParameter(name='user_uid', required=False, type=str),
-        ]
-    )
-    def list(self, request, *args, **kwargs):
-        """
-        Получение списка сохраненных анкет с возможностью фильтрации.
-
-        Поддерживает Query-параметры `equipment_uid` и `user_uid` для поиска
-        истории проверок конкретного оборудования или конкретным инспектором.
-        """
-
-        queryset = self.get_queryset()
-        equipment_uid = request.query_params.get('equipment_uid')
-        user_uid = request.query_params.get('user_uid')
-
-        if equipment_uid:
-            queryset = queryset.filter(equipment_uid=equipment_uid)
-        if user_uid:
-            queryset = queryset.filter(user_uid=user_uid)
-
-        serializer = self.get_serializer(queryset, many=True)
-        return Response(serializer.data)
