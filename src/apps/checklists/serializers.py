@@ -34,6 +34,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             'name',
             'field_type',
             'field_type_display',
+            'is_required',
             'order',
             'choices',
         ]
@@ -138,6 +139,14 @@ class TemplateSerializer(serializers.ModelSerializer):
                 "Создайте новый шаблон."
             )
 
+        if ('equipment_uid' in validated_data
+                and validated_data['equipment_uid'] != instance.equipment_uid):
+            raise ValidationError({"equipment_uid": "Нельзя изменить UID оборудования у существующего шаблона."})
+
+        if ('checklist_type' in validated_data
+                and validated_data['checklist_type'] != instance.checklist_type):
+            raise ValidationError({"checklist_type": "Нельзя изменить тип чек-листа у существующего шаблона."})
+
         fields_data = validated_data.pop('fields', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -180,12 +189,13 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     допустимость Boolean, наличие значения в списке FieldChoice.
     """
 
-    equipment_uid = serializers.CharField(max_length=255)
-    user_uid = serializers.CharField(max_length=255)
+    equipment_uid = serializers.CharField(max_length=255, write_only=True, required=False)
     checklist_type = serializers.CharField(max_length=50, write_only=True)
 
+    user_uid = serializers.CharField(max_length=36)
+
     answers = serializers.DictField(
-        child=serializers.CharField(), allow_empty=False, write_only=True
+        child=serializers.CharField(allow_blank=True), allow_empty=True
     )
 
     def validate(self, attrs):
@@ -203,25 +213,26 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         Возвращает подготовленный и безопасный список данных для метода create().
         """
 
-        equipment_uid = attrs.get('equipment_uid')
-        checklist_type = attrs.get('checklist_type')
-        answers_data = attrs.get('answers')
+        answers_data = attrs.get('answers', {})
 
-        try:
-            template = Template.objects.prefetch_related('fields__choices').get(
-                equipment_uid=equipment_uid, checklist_type=checklist_type
-            )
-        except Template.DoesNotExist:
-            raise ValidationError('Шаблон для данного оборудования и типа не найден.')
+        if self.instance:
+            template = self.instance.template
+        else:
+            template = Template.objects.prefetch_related('fields__choices').filter(
+                equipment_uid=attrs.get('equipment_uid'),
+                checklist_type=attrs.get('checklist_type'),
+                is_deprecated=False
+            ).first()
+            if not template:
+                raise ValidationError("Активный шаблон для данного оборудования не найден.")
 
         template_fields = {str(f.id): f for f in template.fields.all()}
 
-        missing_fields = set(template_fields.keys()) - set(answers_data.keys())
+        required_fields = {str(f.id) for f in template.fields.all() if f.is_required}
+        missing = required_fields - set(answers_data.keys())
 
-        if missing_fields:
-            raise ValidationError(
-                f'Пропущены обязательные поля (ID): {",".join(missing_fields)}'
-            )
+        if missing:
+            raise ValidationError(f"Пропущены обязательные поля (ID): {', '.join(missing)}")
 
         errors = {}
         validated_answers = []
@@ -232,8 +243,16 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 continue
 
             field = template_fields[f_id]
-            error_msg = self._validate_single_field(field, value)
 
+            if not field.is_required and value == "":
+                validated_answers.append({'field': field, 'value': ""})
+                continue
+
+            if field.is_required and value == "":
+                errors[f_id] = "Обязательное поле не может быть пустым."
+                continue
+
+            error_msg = self._validate_single_field(field, value)
             if error_msg:
                 errors[f_id] = error_msg
             else:
@@ -248,23 +267,19 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         return attrs
 
     @staticmethod
-    def _validate_single_field(self, field, value):
+    def _validate_single_field(field, value):
         """
-        Вспомогательный метод: проверяет одно поле.
+        Вспомогательный метод для валидации: проверяет одно поле.
         Возвращает текст ошибки или None.
         """
 
-        if (field.field_type == TemplateField.FieldType.NUMBER
-                and not value.lstrip(
-                '-').isdigit()):
+        if field.field_type == TemplateField.FieldTypes.INTEGER and not value.lstrip('-').isdigit():
             return f"Поле '{field.name}' должно быть целым числом."
-
-        elif field.field_type == TemplateField.FieldType.CHOICE:
+        elif field.field_type == TemplateField.FieldTypes.CHOICE:
             valid_choices = [c.value for c in field.choices.all()]
             if value not in valid_choices:
                 return f"Значение '{value}' недопустимо. Варианты: {valid_choices}"
-
-        elif field.field_type == TemplateField.FieldType.CHECKBOX:
+        elif field.field_type == TemplateField.FieldTypes.CHECKBOX:
             if value.lower() not in ['true', 'false', '1', '0']:
                 return f"Поле '{field.name}' должно быть логическим (true/false)."
 
@@ -294,21 +309,33 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     @transaction.atomic
     def update(self, instance, validated_data):
         """
-        Атомарно изменяет заполненный чек-лист, а также его ответы.
+        Атомарно создает обновленный экземпляр заполненного чек-листа,
+        помечая старый как устаревший.
         """
 
-        instance.user_uid = validated_data.get('user_uid', instance.user_uid)
-        instance.save()
+        instance.is_deprecated = True
+        instance.save(update_fields=['is_deprecated'])
 
-        validated_answers = validated_data.get('validated_answers', None)
-        if validated_answers:
-            for item in validated_answers:
-                ChecklistAnswer.objects.update_or_create(
-                    result=instance,
-                    field=item['field'],
-                    defaults={'value': item['value']},
-                )
-        return instance
+        new_result = ChecklistResult.objects.create(
+            template=instance.template,
+            user_uid=validated_data.get('user_uid', instance.user_uid),
+            origin=instance.origin if instance.origin else instance
+        )
+
+        answers_to_create = [
+            ChecklistAnswer(result=new_result, field=item['field'], value=item['value'])
+            for item in validated_data['validated_answers']
+        ]
+        ChecklistAnswer.objects.bulk_create(answers_to_create)
+
+        return new_result
+
+    def to_representation(self, instance):
+        """
+        Переопределяем выдачи ответа после успешного POST/PUT запроса.
+        """
+
+        return ChecklistResultListSerializer(instance, context=self.context).data
 
 
 class ChecklistAnswerSerializer(serializers.ModelSerializer):
@@ -338,7 +365,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     DTO для вывода истории заполненных чек-листов (включая вложенные ответы).
     """
 
-    checklist_type = serializers.CharField(source='template.checklist_type')
+    checklist_type = serializers.CharField(source='template.checklist_type', read_only=True)
     checklist_type_display = serializers.CharField(
         source='template.get_checklist_type_display',
         read_only=True
@@ -355,6 +382,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'user_uid',
             'checklist_type',
             'checklist_type_display',
+            'is_deprecated',
             'created_at',
             'updated_at',
             'answers'

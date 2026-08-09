@@ -1,3 +1,4 @@
+from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -16,8 +17,8 @@ class TemplateViewSet(viewsets.ModelViewSet):
     Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
     """
 
-    queryset = Template.objects.filter(is_deprecated=False).prefetch_related(
-        'fields__choices')
+    queryset = Template.objects.prefetch_related('fields__choices')
+
     serializer_class = TemplateSerializer
 
     filter_backends = [DjangoFilterBackend]
@@ -53,14 +54,37 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         current_template = self.get_object()
 
-        history_queryset = Template.objects.filter(
-            equipment_uid=current_template.equipment_uid,
-            checklist_type=current_template.checklist_type
-        ).prefetch_related('fields__choices').order_by('-created_at')
+        history_queryset = (Template.objects
+                            .filter(equipment_uid=current_template.equipment_uid,
+                                    checklist_type=current_template.checklist_type)
+                            .prefetch_related('fields__choices')
+                            .order_by('-created_at'))
 
         serializer = self.get_serializer(history_queryset, many=True)
 
         return Response(serializer.data)
+
+    def get_queryset(self):
+        """
+        При запросе всего списка шаблонов возвращает только актуальные.
+        По-прямому ID возвращает всю историю для данного шаблона.
+        """
+
+        qs = super().get_queryset()
+        if self.action == 'list':
+            return qs.filter(is_deprecated=False)
+
+        return qs
+
+    @action(detail=False, methods=['get'])
+    def equipments(self, request):
+        """
+        Возвращает список уникальных UID оборудования из активных шаблонов.
+        Идеально для подсказок (autocomplete) на фронтенде.
+        """
+
+        uids = self.get_queryset().values_list('equipment_uid', flat=True).distinct()
+        return Response(list(uids))
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -70,13 +94,29 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     - POST/PUT/PATCH: принимает плоский словарь ответов
     и выполняет динамическую валидацию типов данных.
     - GET: возвращает историю заполненных анкет.
+    - GET /history/ : возвращает полную историю всех изменений анкеты.
     """
 
-    queryset = ChecklistResult.objects.select_related(
-        'template').prefetch_related('answers__field')
+    queryset = (ChecklistResult.objects
+                .select_related('template')
+                .prefetch_related('answers__field'))
 
     filter_backends = [DjangoFilterBackend]
     filterset_class = ChecklistResultFilter
+
+    def get_queryset(self):
+        """
+        При запросе полного списка анкет возвращает только актуальные,
+        отсекая устаревшие версии.
+        По запросе по-конкретному ID возвращает всю историю для данной анкеты.
+        """
+
+        qs = super().get_queryset()
+
+        if self.action == 'list':
+            return qs.filter(is_deprecated=False)
+
+        return qs
 
     def get_serializer_class(self):
         """
@@ -90,3 +130,24 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update']:
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
+
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
+        """
+        Возвращает историю изменений конкретной анкеты.
+        Включает оригинал и все его исправления, отсортированные от новых к старым.
+        """
+
+        current_result = self.get_object()
+
+        origin_id = current_result.origin_id if current_result.origin_id else current_result.id
+
+        history_queryset = (ChecklistResult.objects
+                            .filter(Q(id=origin_id) | Q(origin_id=origin_id))
+                            .select_related('template')
+                            .prefetch_related('answers__field')
+                            .order_by('-created_at'))
+
+        serializer = self.get_serializer(history_queryset, many=True)
+
+        return Response(serializer.data)

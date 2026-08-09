@@ -10,7 +10,7 @@ class ChecklistResultFilter(django_filters.FilterSet):
 
     equipment_uid = django_filters.CharFilter(
         field_name='template__equipment_uid',
-        ookup_expr='exact'
+        lookup_expr='exact'
     )
 
     class Meta:

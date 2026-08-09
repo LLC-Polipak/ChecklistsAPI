@@ -59,15 +59,16 @@ class TemplateField(models.Model):
     name = models.CharField('Название поля', max_length=255)
     field_type = models.CharField('Тип поля', max_length=20, choices=FieldTypes.choices)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
+    is_required = models.BooleanField('Обязательное поле', default=True)
 
     class Meta:
         ordering = ['order', 'id']
-        verbose_name = 'Поле шаблона'
-        verbose_name_plural = 'Поля шаблонов'
         constraints = [
             models.UniqueConstraint(fields=['template', 'order'],
                                     name='unique_field_order_per_template')
         ]
+        verbose_name = 'Поле шаблона'
+        verbose_name_plural = 'Поля шаблонов'
 
 
     def __str__(self):
@@ -111,6 +112,18 @@ class ChecklistResult(models.Model):
         Template, on_delete=models.PROTECT, related_name='results'
     )
     user_uid = models.CharField('UID Пользователя', max_length=255, db_index=True)
+
+    is_deprecated = models.BooleanField('Устаревшая версия', default=False)
+
+    origin = models.ForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='edits',
+        verbose_name='Оригинальная анкета'
+    )
+
     created_at = models.DateTimeField('Дата заполнения', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
 
@@ -119,7 +132,8 @@ class ChecklistResult(models.Model):
         verbose_name_plural = 'Результаты чек-листов'
 
     def __str__(self):
-        return f'Анкета {self.template.checklist_type} от {self.user_uid}'
+        status = "[ИЗМЕНЕНА] " if self.is_deprecated else ""
+        return f"{status}Анкета {self.id} от {self.user_uid}"
 
 
 class ChecklistAnswer(models.Model):
