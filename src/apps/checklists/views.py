@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from apps.checklists.filters import TemplateFilter, ChecklistResultFilter
-from apps.checklists.models import ChecklistResult, Template
+from apps.checklists.models import ChecklistResult, Template, ChecklistSignature
 from apps.checklists.serializers import ChecklistResultCreateSerializer, \
     ChecklistResultListSerializer, TemplateSerializer
 
@@ -151,3 +151,34 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(history_queryset, many=True)
 
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def sign(self, request, pk=None):
+        """
+        Эндпоинт для подписания анкеты.
+        Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}
+        """
+        
+        result = self.get_object()
+        role = request.data.get('role')
+        user_uid = request.data.get('user_uid')
+
+        if not role or not user_uid:
+            return Response({'error': 'Требуется передать role и user_uid'}, status=400)
+
+        if role not in ChecklistSignature.Role.values:
+            return Response({'error': 'Неверная роль подписанта'}, status=400)
+
+        if result.is_deprecated:
+            return Response({'error': 'Нельзя подписать устаревшую анкету'}, status=400)
+
+        try:
+            ChecklistSignature.objects.create(
+                result=result, role=role, user_uid=user_uid
+            )
+
+            result.check_and_complete()
+
+            return Response({'message': 'Анкета успешно подписана!'})
+        except Exception as e:
+            return Response({'error': 'Эта роль уже подписала анкету!'}, status=400)

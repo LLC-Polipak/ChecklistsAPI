@@ -2,8 +2,14 @@ from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from apps.checklists.models import ChecklistAnswer, ChecklistResult, \
-    FieldChoice, Template, TemplateField
+from apps.checklists.models import (
+    ChecklistAnswer,
+    ChecklistResult,
+    FieldChoice,
+    Template,
+    TemplateField,
+    ChecklistSignature,
+)
 
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
@@ -34,6 +40,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             'name',
             'field_type',
             'field_type_display',
+            'group_name',
             'is_required',
             'order',
             'choices',
@@ -61,6 +68,15 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
                 attrs['choices'] = []
 
         return attrs
+
+
+class AnswerItemSerializer(serializers.Serializer):
+    """
+    Вспомогательный DTO для ответов с комментарием
+    """
+
+    value = serializers.CharField(allow_blank=True)
+    comment = serializers.CharField(allow_blank=True, required=False, default="")
 
 
 class TemplateSerializer(serializers.ModelSerializer):
@@ -194,9 +210,12 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
     user_uid = serializers.CharField(max_length=36)
 
-    answers = serializers.DictField(
-        child=serializers.CharField(allow_blank=True), allow_empty=True
+    shift_number = serializers.CharField(
+        max_length=50, required=False, allow_blank=True
     )
+    shift_time = serializers.CharField(max_length=100, required=False, allow_blank=True)
+
+    answers = serializers.DictField(child=AnswerItemSerializer(), allow_empty=True)
 
     def validate(self, attrs):
         """
@@ -237,12 +256,14 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         errors = {}
         validated_answers = []
 
-        for f_id, value in answers_data.items():
+        for f_id, answer_obj in answers_data.items():
             if f_id not in template_fields:
                 errors[f_id] = "Поле не принадлежит этому шаблону."
                 continue
 
             field = template_fields[f_id]
+            value = answer_obj['value']
+            comment = answer_obj.get('comment', '')
 
             if not field.is_required and value == "":
                 validated_answers.append({'field': field, 'value': ""})
@@ -295,14 +316,21 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         result = ChecklistResult.objects.create(
             template=validated_data['template'],
             user_uid=validated_data['user_uid'],
+            shift_number=validated_data.get('shift_number', ''),
+            shift_time=validated_data.get('shift_time', ''),
         )
 
-        answers_to_create = [
-            ChecklistAnswer(result=result, field=item['field'], value=item['value'])
+        answers = [
+            ChecklistAnswer(
+                result=result,
+                field=item['field'],
+                value=item['value'],
+                comment=item['comment'],
+            )
             for item in validated_data['validated_answers']
         ]
 
-        ChecklistAnswer.objects.bulk_create(answers_to_create)
+        ChecklistAnswer.objects.bulk_create(answers)
 
         return result
 
@@ -319,14 +347,30 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         new_result = ChecklistResult.objects.create(
             template=instance.template,
             user_uid=validated_data.get('user_uid', instance.user_uid),
-            origin=instance.origin if instance.origin else instance
+            shift_number=validated_data.get('shift_number', instance.shift_number),
+            shift_time=validated_data.get('shift_time', instance.shift_time),
+            origin=instance.origin if instance.origin else instance,
         )
 
-        answers_to_create = [
-            ChecklistAnswer(result=new_result, field=item['field'], value=item['value'])
+        answers = [
+            ChecklistAnswer(
+                result=new_result,
+                field=item['field'],
+                value=item['value'],
+                comment=item['comment'],
+            )
             for item in validated_data['validated_answers']
         ]
-        ChecklistAnswer.objects.bulk_create(answers_to_create)
+
+        ChecklistAnswer.objects.bulk_create(answers)
+
+        for old_sig in instance.signatures.all():
+            ChecklistSignature.objects.create(
+                result=new_result,
+                role=old_sig.role,
+                user_uid=old_sig.user_uid,
+                signed_at=old_sig.signed_at,
+            )
 
         return new_result
 
@@ -356,7 +400,8 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
             'field_name',
             'field_type',
             'field_type_display',
-            'value'
+            'value',
+            'comment'
         ]
 
 
@@ -377,13 +422,15 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChecklistResult
         fields = [
-            'id',
-            'equipment_uid',
-            'user_uid',
-            'checklist_type',
-            'checklist_type_display',
-            'is_deprecated',
-            'created_at',
-            'updated_at',
-            'answers'
+            'id', 'equipment_uid', 'user_uid', 'checklist_type',
+            'checklist_type_display', 'shift_number', 'shift_time',
+            'is_completed', 'is_deprecated', 'created_at',
+            'updated_at', 'signatures', 'answers',
         ]
+
+
+class ChecklistSignatureSerializer(serializers.ModelSerializer):
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
+    class Meta:
+        model = ChecklistSignature
+        fields = ['role', 'role_display', 'user_uid', 'signed_at']

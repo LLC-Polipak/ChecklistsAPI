@@ -57,6 +57,9 @@ class TemplateField(models.Model):
         Template, on_delete=models.CASCADE, related_name='fields'
     )
     name = models.CharField('Название поля', max_length=255)
+    group_name = models.CharField(
+        'Группа полей', max_length=255, blank=True, default=''
+    )
     field_type = models.CharField('Тип поля', max_length=20, choices=FieldTypes.choices)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
     is_required = models.BooleanField('Обязательное поле', default=True)
@@ -115,6 +118,10 @@ class ChecklistResult(models.Model):
 
     is_deprecated = models.BooleanField('Устаревшая версия', default=False)
 
+    shift_number = models.CharField('Номер смены', max_length=50, blank=True, default='')
+    shift_time = models.CharField('Время смены', max_length=100, blank=True, default='')
+    is_completed = models.BooleanField('Завершена', default=False)
+
     origin = models.ForeignKey(
         'self',
         on_delete=models.CASCADE,
@@ -135,6 +142,22 @@ class ChecklistResult(models.Model):
         status = "[ИЗМЕНЕНА] " if self.is_deprecated else ""
         return f"{status}Анкета {self.id} от {self.user_uid}"
 
+    def check_and_complete(self):
+        """
+        Проверяет наличие всех трех подписей и завершает анкету.
+        """
+
+        required_roles = {
+            ChecklistSignature.Role.OPERATOR_OUT,
+            ChecklistSignature.Role.OPERATOR_IN,
+            ChecklistSignature.Role.MASTER,
+        }
+        current_roles = set(self.signatures.values_list('role', flat=True))
+
+        if required_roles.issubset(current_roles):
+            self.is_completed = True
+            self.save(update_fields=['is_completed'])
+
 
 class ChecklistAnswer(models.Model):
     """
@@ -151,6 +174,7 @@ class ChecklistAnswer(models.Model):
         TemplateField, on_delete=models.PROTECT, related_name='answers'
     )
     value = models.TextField('Текст ответа')
+    comment = models.TextField('Комментарий', blank=True, default='')
 
     class Meta:
         unique_together = ('result', 'field')
@@ -159,3 +183,24 @@ class ChecklistAnswer(models.Model):
 
     def __str__(self):
         return f'{self.field.name}:{self.value}'
+
+
+class ChecklistSignature(models.Model):
+    """
+    Модель электронных подписей для анкеты.
+    """
+
+    class Role(models.TextChoices):
+        OPERATOR_OUT = 'OPERATOR_OUT', 'Сдающий оператор'
+        OPERATOR_IN = 'OPERATOR_IN', 'Принимающий оператор'
+        MASTER = 'MASTER', 'Мастер смены'
+
+    result = models.ForeignKey(ChecklistResult, on_delete=models.CASCADE, related_name='signatures')
+    role = models.CharField('Роль', max_length=20, choices=Role.choices)
+    user_uid = models.CharField('UID Подписанта', max_length=255)
+    signed_at = models.DateTimeField('Дата подписи', auto_now_add=True)
+
+    class Meta:
+        unique_together = ('result', 'role')
+        verbose_name = 'Подпись'
+        verbose_name_plural = 'Подписи'
