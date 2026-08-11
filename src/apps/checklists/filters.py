@@ -1,5 +1,6 @@
 import django_filters
-from apps.checklists.models import Template, ChecklistResult
+
+from apps.checklists.models import ChecklistResult, Template
 
 
 class ChecklistResultFilter(django_filters.FilterSet):
@@ -9,8 +10,7 @@ class ChecklistResultFilter(django_filters.FilterSet):
     """
 
     equipment_uid = django_filters.CharFilter(
-        field_name='template__equipment_uid',
-        lookup_expr='exact'
+        field_name='template__equipment_uid', lookup_expr='exact'
     )
 
     class Meta:

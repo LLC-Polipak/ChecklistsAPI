@@ -1,13 +1,16 @@
 from django.db.models import Q
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import viewsets, status
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from apps.checklists.filters import TemplateFilter, ChecklistResultFilter
-from apps.checklists.models import ChecklistResult, Template, ChecklistSignature
-from apps.checklists.serializers import ChecklistResultCreateSerializer, \
-    ChecklistResultListSerializer, TemplateSerializer
+from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
+from apps.checklists.models import ChecklistResult, ChecklistSignature, Template
+from apps.checklists.serializers import (
+    ChecklistResultCreateSerializer,
+    ChecklistResultListSerializer,
+    TemplateSerializer,
+)
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -39,8 +42,10 @@ class TemplateViewSet(viewsets.ModelViewSet):
         if instance.results.exists():
             return Response(
                 {
-                    "error": "Невозможно удалить шаблон, так как по нему уже есть заполненные анкеты."},
-                status=status.HTTP_400_BAD_REQUEST
+                    'error': 'Невозможно удалить шаблон, '
+                    'так как по нему уже есть заполненные анкеты.'
+                },
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         return super().destroy(request, *args, **kwargs)
@@ -54,11 +59,14 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         current_template = self.get_object()
 
-        history_queryset = (Template.objects
-                            .filter(equipment_uid=current_template.equipment_uid,
-                                    checklist_type=current_template.checklist_type)
-                            .prefetch_related('fields__choices')
-                            .order_by('-created_at'))
+        history_queryset = (
+            Template.objects.filter(
+                equipment_uid=current_template.equipment_uid,
+                checklist_type=current_template.checklist_type,
+            )
+            .prefetch_related('fields__choices')
+            .order_by('-created_at')
+        )
 
         serializer = self.get_serializer(history_queryset, many=True)
 
@@ -97,9 +105,9 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     - GET /history/ : возвращает полную историю всех изменений анкеты.
     """
 
-    queryset = (ChecklistResult.objects
-                .select_related('template')
-                .prefetch_related('answers__field'))
+    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
+        'answers__field'
+    )
 
     filter_backends = [DjangoFilterBackend]
     filterset_class = ChecklistResultFilter
@@ -140,13 +148,16 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
         current_result = self.get_object()
 
-        origin_id = current_result.origin_id if current_result.origin_id else current_result.id
+        origin_id = (
+            current_result.origin_id if current_result.origin_id else current_result.id
+        )
 
-        history_queryset = (ChecklistResult.objects
-                            .filter(Q(id=origin_id) | Q(origin_id=origin_id))
-                            .select_related('template')
-                            .prefetch_related('answers__field')
-                            .order_by('-created_at'))
+        history_queryset = (
+            ChecklistResult.objects.filter(Q(id=origin_id) | Q(origin_id=origin_id))
+            .select_related('template')
+            .prefetch_related('answers__field')
+            .order_by('-created_at')
+        )
 
         serializer = self.get_serializer(history_queryset, many=True)
 
@@ -158,27 +169,44 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Эндпоинт для подписания анкеты.
         Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}
         """
-        
+
         result = self.get_object()
         role = request.data.get('role')
         user_uid = request.data.get('user_uid')
 
         if not role or not user_uid:
-            return Response({'error': 'Требуется передать role и user_uid'}, status=400)
-
-        if role not in ChecklistSignature.Role.values:
-            return Response({'error': 'Неверная роль подписанта'}, status=400)
-
-        if result.is_deprecated:
-            return Response({'error': 'Нельзя подписать устаревшую анкету'}, status=400)
-
-        try:
-            ChecklistSignature.objects.create(
-                result=result, role=role, user_uid=user_uid
+            return Response(
+                {'error': 'Требуется передать role и user_uid'},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            result.check_and_complete()
+        if role not in ChecklistSignature.Role.values:
+            return Response(
+                {'error': 'Неверная роль подписанта'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-            return Response({'message': 'Анкета успешно подписана!'})
-        except Exception as e:
-            return Response({'error': 'Эта роль уже подписала анкету!'}, status=400)
+        if result.is_deprecated:
+            return Response(
+                {'error': 'Нельзя подписать устаревшую анкету'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.utils.timezone import now
+
+        signature, created = ChecklistSignature.objects.get_or_create(
+            result=result, role=role, defaults={'user_uid': user_uid}
+        )
+
+        if not created:
+            signature.user_uid = user_uid
+            signature.signed_at = now()
+            signature.save(update_fields=['user_uid', 'signed_at'])
+
+        result.check_and_complete()
+
+        status_msg = (
+            'Анкета успешно подписана!' if created else 'Подпись успешно обновлена!'
+        )
+
+        return Response({'message': status_msg, 'is_completed': result.is_completed})
