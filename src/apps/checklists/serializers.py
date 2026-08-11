@@ -157,15 +157,27 @@ class TemplateSerializer(serializers.ModelSerializer):
 
         if ('equipment_uid' in validated_data
                 and validated_data['equipment_uid'] != instance.equipment_uid):
-            raise ValidationError({"equipment_uid": "Нельзя изменить UID оборудования у существующего шаблона."})
+            raise ValidationError(
+                {
+                    "equipment_uid":
+                        "Нельзя изменить UID оборудования у существующего шаблона."
+                }
+            )
 
         if ('checklist_type' in validated_data
                 and validated_data['checklist_type'] != instance.checklist_type):
-            raise ValidationError({"checklist_type": "Нельзя изменить тип чек-листа у существующего шаблона."})
+            raise ValidationError(
+                {
+                    "checklist_type":
+                        "Нельзя изменить тип чек-листа у существующего шаблона."
+                }
+            )
 
         fields_data = validated_data.pop('fields', None)
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
         instance.save()
 
         if fields_data:

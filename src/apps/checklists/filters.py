@@ -15,7 +15,7 @@ class ChecklistResultFilter(django_filters.FilterSet):
 
     class Meta:
         model = ChecklistResult
-        fields = ['user_uid', 'equipment_uid']
+        fields = ['user_uid', 'equipment_uid', 'created_at']
 
 
 class TemplateFilter(django_filters.FilterSet):

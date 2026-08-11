@@ -18,7 +18,8 @@ class Template(models.Model):
         ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
         HANDOVER = 'HANDOVER', 'Сдача'
 
-    equipment_uid = models.CharField('UID-оборудования', max_length=36, db_index=True)
+    equipment_uid = models.CharField('UID-оборудования', max_length=36,
+                                     db_index=True)
     checklist_type = models.CharField(
         'Тип чек-листа', max_length=50, choices=ChecklistTypes.choices
     )
@@ -60,7 +61,8 @@ class TemplateField(models.Model):
     group_name = models.CharField(
         'Группа полей', max_length=255, blank=True, default=''
     )
-    field_type = models.CharField('Тип поля', max_length=20, choices=FieldTypes.choices)
+    field_type = models.CharField('Тип поля', max_length=20,
+                                  choices=FieldTypes.choices)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
     is_required = models.BooleanField('Обязательное поле', default=True)
 
@@ -114,12 +116,15 @@ class ChecklistResult(models.Model):
     template = models.ForeignKey(
         Template, on_delete=models.PROTECT, related_name='results'
     )
-    user_uid = models.CharField('UID Пользователя', max_length=255, db_index=True)
+    user_uid = models.CharField('UID Пользователя', max_length=255,
+                                db_index=True)
 
     is_deprecated = models.BooleanField('Устаревшая версия', default=False)
 
-    shift_number = models.CharField('Номер смены', max_length=50, blank=True, default='')
-    shift_time = models.CharField('Время смены', max_length=100, blank=True, default='')
+    shift_number = models.CharField('Номер смены', max_length=50,
+                                    blank=True, default='')
+    shift_time = models.CharField('Время смены', max_length=100,
+                                  blank=True, default='')
     is_completed = models.BooleanField('Завершена', default=False)
 
     origin = models.ForeignKey(
@@ -195,7 +200,8 @@ class ChecklistSignature(models.Model):
         OPERATOR_IN = 'OPERATOR_IN', 'Принимающий оператор'
         MASTER = 'MASTER', 'Мастер смены'
 
-    result = models.ForeignKey(ChecklistResult, on_delete=models.CASCADE, related_name='signatures')
+    result = models.ForeignKey(ChecklistResult, on_delete=models.CASCADE,
+                               related_name='signatures')
     role = models.CharField('Роль', max_length=20, choices=Role.choices)
     user_uid = models.CharField('UID Подписанта', max_length=255)
     signed_at = models.DateTimeField('Дата подписи', auto_now_add=True)
