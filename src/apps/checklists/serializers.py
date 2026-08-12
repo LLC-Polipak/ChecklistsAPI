@@ -42,7 +42,6 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             'name',
             'field_type',
             'field_type_display',
-            'group_name',
             'is_required',
             'order',
             'choices',
@@ -117,7 +116,7 @@ class TemplateSerializer(serializers.ModelSerializer):
             'updated_at',
             'is_deprecated',
             'has_results',
-            'fields',
+            'groups',
         ]
         model = Template
         read_only_fields = ['id', 'created_at', 'updated_at', 'has_results']
@@ -295,28 +294,32 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         if self.instance:
             template = self.instance.template
         else:
-            template = (
-                Template.objects.prefetch_related('fields__choices')
-                .filter(
-                    equipment_uid=attrs.get('equipment_uid'),
-                    checklist_type=attrs.get('checklist_type'),
-                    is_deprecated=False,
-                )
-                .first()
-            )
+            template = Template.objects.prefetch_related(
+                'groups__fields__choices').filter(
+                equipment_uid=attrs.get('equipment_uid'),
+                checklist_type=attrs.get('checklist_type'),
+                is_deprecated=False
+            ).first()
+
             if not template:
                 raise ValidationError(
-                    'Активный шаблон для данного оборудования не найден.'
+                    "Активный шаблон для данного оборудования не найден."
                 )
 
-        template_fields = {str(f.id): f for f in template.fields.all()}
+        template_fields = {}
 
-        required_fields = {str(f.id) for f in template.fields.all() if f.is_required}
+        for group in template.groups.all():
+            for f in group.fields.all():
+                template_fields[str(f.id)] = f
+
+        required_fields = {str(f.id) for f in template_fields.values() if
+                           f.is_required}
+
         missing = required_fields - set(answers_data.keys())
 
         if missing:
             raise ValidationError(
-                f'Пропущены обязательные поля (ID): {", ".join(missing)}'
+                f"Пропущены обязательные поля (ID): {', '.join(missing)}"
             )
 
         errors = {}

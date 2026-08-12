@@ -20,7 +20,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
     Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
     """
 
-    queryset = Template.objects.prefetch_related('fields__choices')
+    queryset = Template.objects.prefetch_related('groups__fields__choices')
 
     serializer_class = TemplateSerializer
 

@@ -79,9 +79,6 @@ class TemplateField(models.Model):
         CHECKBOX = 'CHECKBOX', 'Чекбокс'
         AUTO = 'AUTO', 'Автозаполняемое значение'
 
-    template = models.ForeignKey(
-        Template, on_delete=models.CASCADE, related_name='fields'
-    )
     group = models.ForeignKey(
         TemplateFieldGroup, on_delete=models.CASCADE, related_name='fields'
     )
