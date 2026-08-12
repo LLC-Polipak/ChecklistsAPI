@@ -11,6 +11,7 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   migrations:
+    image: polipak/checklists_backend:dev
     build:
       context: ../src
       dockerfile: Dockerfile
@@ -22,6 +23,7 @@ services:
     command: python manage.py migrate --noinput
 
   backend:
+    image: polipak/checklists_backend:dev
     build:
       context: ../src
       dockerfile: Dockerfile

@@ -1,11 +1,12 @@
-from django.views.generic import TemplateView
-from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import viewsets
-from rest_framework.permissions import AllowAny
+from django.db.models import Q
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import status, viewsets
+from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .models import ChecklistResult, Template
-from .serializers import (
+from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
+from apps.checklists.models import ChecklistResult, ChecklistSignature, Template
+from apps.checklists.serializers import (
     ChecklistResultCreateSerializer,
     ChecklistResultListSerializer,
     TemplateSerializer,
@@ -18,50 +19,77 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
     Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
     """
+    queryset = Template.objects.prefetch_related('groups__fields__choices')
 
-    queryset = Template.objects.all()
     serializer_class = TemplateSerializer
-    permission_classes = [AllowAny]
 
-    @extend_schema(
-        summary='Получить список шаблонов (или один по фильтрам)',
-        parameters=[
-            OpenApiParameter(
-                name='equipment_uid',
-                description='Фильтр по оборудованию',
-                required=False,
-                type=str,
-            ),
-            OpenApiParameter(
-                name='checklist_type',
-                description='Фильтр по типу чек-листа',
-                required=False,
-                type=str,
-            ),
-        ],
-    )
-    def list(self, request, *args, **kwargs):
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = TemplateFilter
+
+    def destroy(self, request, *args, **kwargs):
         """
-        Извлекает шаблон из БД по параметрам и отдает его структуру.
+        Отвечает за удаление шаблона.
 
         Returns:
-            HTTP 200: JSON со структурой полей и вариантами выбора.
-            HTTP 400: Если отсутствуют обязательные query-параметры.
-            HTTP 404: Если шаблон с такими параметрами не найден.
+            HTTP 204: Удаление шаблон прошло успешно.
+            HTTP 400: Если на шаблон есть заполненный анкета.
+            HTTP 404: Шаблон с таким параметром не найден.
         """
-        queryset = self.get_queryset()
+        instance = self.get_object()
 
-        equipment_uid = request.query_params.get('equipment_uid')
-        checklist_type = request.query_params.get('checklist_type')
+        if instance.results.exists():
+            return Response(
+                {
+                    'error': 'Невозможно удалить шаблон, '
+                    'так как по нему уже есть заполненные анкеты.'
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        if equipment_uid:
-            queryset = queryset.filter(equipment_uid=equipment_uid)
-        if checklist_type:
-            queryset = queryset.filter(checklist_type=checklist_type)
+        return super().destroy(request, *args, **kwargs)
 
-        serializer = self.get_serializer(queryset, many=True)
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
+        """
+        Возвращает историю изменений для данного шаблона.
+        (Находит все устаревшие и текущую версию для этого оборудования и типа).
+        """
+        current_template = self.get_object()
+
+        history_queryset = (
+            Template.objects.filter(
+                equipment_uid=current_template.equipment_uid,
+                checklist_type=current_template.checklist_type,
+            )
+            .prefetch_related('fields__choices')
+            .order_by('-created_at')
+        )
+
+        serializer = self.get_serializer(history_queryset, many=True)
 
         return Response(serializer.data)
+
+    def get_queryset(self):
+        """
+        При запросе всего списка шаблонов возвращает только актуальные.
+        По-прямому ID возвращает всю историю для данного шаблона.
+        """
+        qs = super().get_queryset()
+        if self.action == 'list':
+            return qs.filter(is_deprecated=False)
+
+        return qs
+
+    @action(detail=False, methods=['get'])
+    def equipments(self, request):
+        """
+        Возвращает список уникальных UID оборудования из активных шаблонов.
+        Идеально для подсказок (autocomplete) на фронтенде.
+        """
+        uids = (self.get_queryset()
+                .values_list('equipment_uid', flat=True).distinct())
+
+        return Response(list(uids))
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -71,12 +99,28 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     - POST/PUT/PATCH: принимает плоский словарь ответов
     и выполняет динамическую валидацию типов данных.
     - GET: возвращает историю заполненных анкет.
+    - GET /history/ : возвращает полную историю всех изменений анкеты.
     """
-
-    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
+    queryset = (ChecklistResult.objects.select_related('template')
+    .prefetch_related(
         'answers__field'
-    )
-    permission_classes = [AllowAny]
+    ))
+
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = ChecklistResultFilter
+
+    def get_queryset(self):
+        """
+        При запросе полного списка анкет возвращает только актуальные,
+        отсекая устаревшие версии.
+        По запросе по-конкретному ID возвращает всю историю для данной анкеты.
+        """
+        qs = super().get_queryset()
+
+        if self.action == 'list':
+            return qs.filter(is_deprecated=False)
+
+        return qs
 
     def get_serializer_class(self):
         """
@@ -86,33 +130,81 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
             ChecklistResultCreateSerializer: Для записи.
             ChecklistResultListSerializer: Для чтения.
         """
-
-        if self.action in ['create', 'update', 'partial_update']:
+        if self.action in {'create', 'update', 'partial_update'}:
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
 
-    @extend_schema(
-        parameters=[
-            OpenApiParameter(name='equipment_uid', required=False, type=str),
-            OpenApiParameter(name='user_uid', required=False, type=str),
-        ]
-    )
-    def list(self, request, *args, **kwargs):
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
         """
-        Получение списка сохраненных анкет с возможностью фильтрации.
-
-        Поддерживает Query-параметры `equipment_uid` и `user_uid` для поиска
-        истории проверок конкретного оборудования или конкретным инспектором.
+        Возвращает историю изменений конкретной анкеты.
+        Включает оригинал и все его исправления, отсортированные от новых к старым.
         """
+        current_result = self.get_object()
 
-        queryset = self.get_queryset()
-        equipment_uid = request.query_params.get('equipment_uid')
-        user_uid = request.query_params.get('user_uid')
+        origin_id = current_result.origin_id or current_result.id
 
-        if equipment_uid:
-            queryset = queryset.filter(equipment_uid=equipment_uid)
-        if user_uid:
-            queryset = queryset.filter(user_uid=user_uid)
+        history_queryset = (
+            ChecklistResult.objects.filter(Q(id=origin_id)
+                                           | Q(origin_id=origin_id))
+            .select_related('template')
+            .prefetch_related('answers__field')
+            .order_by('-created_at')
+        )
 
-        serializer = self.get_serializer(queryset, many=True)
+        serializer = self.get_serializer(history_queryset, many=True)
+
         return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def sign(self, request, pk=None):
+        """
+        Эндпоинт для подписания анкеты.
+        Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}.
+        """
+        result = self.get_object()
+        role = request.data.get('role')
+        user_uid = request.data.get('user_uid')
+
+        if not role or not user_uid:
+            return Response(
+                {'error': 'Требуется передать role и user_uid'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if role not in ChecklistSignature.Role.values:
+            return Response(
+                {'error': 'Неверная роль подписанта'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if result.is_deprecated:
+            return Response(
+                {'error': 'Нельзя подписать устаревшую анкету'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from django.utils.timezone import now
+
+        signature, created = ChecklistSignature.objects.get_or_create(
+            result=result, role=role, defaults={'user_uid': user_uid}
+        )
+
+        if not created:
+            signature.user_uid = user_uid
+            signature.signed_at = now()
+            signature.save(update_fields=['user_uid', 'signed_at'])
+
+        result.check_and_complete()
+
+        status_msg = (
+            'Анкета успешно подписана!' if created
+            else 'Подпись успешно обновлена!'
+        )
+
+        return Response(
+            {
+                'message': status_msg,
+                'is_completed': result.is_completed
+            }
+        )
