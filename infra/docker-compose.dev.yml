@@ -12,9 +12,6 @@ services:
 
   migrations:
     image: polipak/checklists_backend:dev
-    build:
-      context: ../src
-      dockerfile: Dockerfile
     container_name: checklists-migrations
     depends_on:
       - db
@@ -24,9 +21,6 @@ services:
 
   backend:
     image: polipak/checklists_backend:dev
-    build:
-      context: ../src
-      dockerfile: Dockerfile
     container_name: checklists-backend
     restart: unless-stopped
     volumes:
