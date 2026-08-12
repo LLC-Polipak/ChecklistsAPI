@@ -19,7 +19,6 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
     Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
     """
-
     queryset = Template.objects.prefetch_related('groups__fields__choices')
 
     serializer_class = TemplateSerializer
@@ -33,10 +32,9 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         Returns:
             HTTP 204: Удаление шаблон прошло успешно.
-            HTTP 400: Если на шаблон есть заполненный чек-лист и его удаление невозможно.
+            HTTP 400: Если на шаблон есть заполненный анкета.
             HTTP 404: Шаблон с таким параметром не найден.
         """
-
         instance = self.get_object()
 
         if instance.results.exists():
@@ -56,7 +54,6 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Возвращает историю изменений для данного шаблона.
         (Находит все устаревшие и текущую версию для этого оборудования и типа).
         """
-
         current_template = self.get_object()
 
         history_queryset = (
@@ -77,7 +74,6 @@ class TemplateViewSet(viewsets.ModelViewSet):
         При запросе всего списка шаблонов возвращает только актуальные.
         По-прямому ID возвращает всю историю для данного шаблона.
         """
-
         qs = super().get_queryset()
         if self.action == 'list':
             return qs.filter(is_deprecated=False)
@@ -90,8 +86,9 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Возвращает список уникальных UID оборудования из активных шаблонов.
         Идеально для подсказок (autocomplete) на фронтенде.
         """
+        uids = (self.get_queryset()
+                .values_list('equipment_uid', flat=True).distinct())
 
-        uids = self.get_queryset().values_list('equipment_uid', flat=True).distinct()
         return Response(list(uids))
 
 
@@ -104,10 +101,10 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     - GET: возвращает историю заполненных анкет.
     - GET /history/ : возвращает полную историю всех изменений анкеты.
     """
-
-    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
+    queryset = (ChecklistResult.objects.select_related('template')
+    .prefetch_related(
         'answers__field'
-    )
+    ))
 
     filter_backends = [DjangoFilterBackend]
     filterset_class = ChecklistResultFilter
@@ -118,7 +115,6 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         отсекая устаревшие версии.
         По запросе по-конкретному ID возвращает всю историю для данной анкеты.
         """
-
         qs = super().get_queryset()
 
         if self.action == 'list':
@@ -134,8 +130,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
             ChecklistResultCreateSerializer: Для записи.
             ChecklistResultListSerializer: Для чтения.
         """
-
-        if self.action in ['create', 'update', 'partial_update']:
+        if self.action in {'create', 'update', 'partial_update'}:
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
 
@@ -145,15 +140,13 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Возвращает историю изменений конкретной анкеты.
         Включает оригинал и все его исправления, отсортированные от новых к старым.
         """
-
         current_result = self.get_object()
 
-        origin_id = (
-            current_result.origin_id if current_result.origin_id else current_result.id
-        )
+        origin_id = current_result.origin_id or current_result.id
 
         history_queryset = (
-            ChecklistResult.objects.filter(Q(id=origin_id) | Q(origin_id=origin_id))
+            ChecklistResult.objects.filter(Q(id=origin_id)
+                                           | Q(origin_id=origin_id))
             .select_related('template')
             .prefetch_related('answers__field')
             .order_by('-created_at')
@@ -167,9 +160,8 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     def sign(self, request, pk=None):
         """
         Эндпоинт для подписания анкеты.
-        Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}
+        Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}.
         """
-
         result = self.get_object()
         role = request.data.get('role')
         user_uid = request.data.get('user_uid')
@@ -206,7 +198,13 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         result.check_and_complete()
 
         status_msg = (
-            'Анкета успешно подписана!' if created else 'Подпись успешно обновлена!'
+            'Анкета успешно подписана!' if created
+            else 'Подпись успешно обновлена!'
         )
 
-        return Response({'message': status_msg, 'is_completed': result.is_completed})
+        return Response(
+            {
+                'message': status_msg,
+                'is_completed': result.is_completed
+            }
+        )

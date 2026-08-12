@@ -3,17 +3,13 @@ from django.db import models
 
 class Template(models.Model):
     """
-    Главная модель шаблона
+    Главная модель шаблона.
 
     Определяет набор полей, которые необходимо заполнить
     при выполнении осмотра, приемки или сдачи оборудования.
     """
-
     class ChecklistTypes(models.TextChoices):
-        """
-        Возможные типы чек-листов
-        """
-
+        """Возможные типы чек-листов."""
         INSPECTION = 'INSPECTION', 'Осмотр'
         ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
         HANDOVER = 'HANDOVER', 'Сдача'
@@ -40,7 +36,6 @@ class TemplateFieldGroup(models.Model):
     Модель для группировки полей в шаблоне.
     Включает в себя ссылку на шаблон, имя группы, а также порядок расположения в шаблоне.
     """
-
     template = models.ForeignKey(
         'Template', on_delete=models.CASCADE, related_name='groups'
     )
@@ -67,12 +62,8 @@ class TemplateField(models.Model):
     Для полей с типом ``CHOICE`` список допустимых значений
     хранится в модели ``FieldChoice``.
     """
-
     class FieldTypes(models.TextChoices):
-        """
-        Возможные типы полей, которые могут быть представлены в шаблоне
-        """
-
+        """Возможные типы полей, которые могут быть представлены в шаблоне."""
         STRING = 'STRING', 'Строка'
         INTEGER = 'INTEGER', 'Целое число'
         CHOICE = 'CHOICE', 'Выбор из списка'
@@ -109,7 +100,6 @@ class FieldChoice(models.Model):
     Используется для формирования списка вариантов,
     доступных пользователю при заполнении чек-листа.
     """
-
     field = models.ForeignKey(
         TemplateField, on_delete=models.CASCADE, related_name='choices'
     )
@@ -134,8 +124,8 @@ class ChecklistResult(models.Model):
     Ответы на отдельные поля хранятся
     в связанных объектах ``ChecklistAnswer``.
     """
-
     class ShiftType(models.TextChoices):
+        """Возможные варианты смены."""
         DAY = 'DAY', 'Дневная'
         NIGHT = 'NIGHT', 'Ночная'
 
@@ -173,10 +163,7 @@ class ChecklistResult(models.Model):
         return f'{status}Анкета {self.id} от {self.user_uid}'
 
     def check_and_complete(self):
-        """
-        Проверяет наличие всех трех подписей и завершает анкету.
-        """
-
+        """Проверяет наличие всех трех подписей и завершает анкету."""
         required_roles = {
             ChecklistSignature.Role.OPERATOR_OUT,
             ChecklistSignature.Role.OPERATOR_IN,
@@ -196,7 +183,6 @@ class ChecklistAnswer(models.Model):
     Связывает заполненный чек-лист с полем шаблона
     и хранит введенное пользователем значение.
     """
-
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='answers'
     )
@@ -220,10 +206,7 @@ class ChecklistAnswer(models.Model):
 
 
 class ChecklistSignature(models.Model):
-    """
-    Модель электронных подписей для анкеты.
-    """
-
+    """Модель электронных подписей для анкеты."""
     class Role(models.TextChoices):
         OPERATOR_OUT = 'OPERATOR_OUT', 'Сдающий оператор'
         OPERATOR_IN = 'OPERATOR_IN', 'Принимающий оператор'
