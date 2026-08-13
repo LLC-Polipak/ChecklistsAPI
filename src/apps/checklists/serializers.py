@@ -1,3 +1,5 @@
+import datetime
+
 from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
@@ -353,6 +355,11 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         elif field.field_type == TemplateField.FieldTypes.CHECKBOX:
             if value.lower() not in {'true', 'false', '1', '0'}:
                 return f"Поле '{field.name}' должно быть логическим (true/false)."
+        elif field.field_type == TemplateField.FieldTypes.DATE:
+            try:
+                datetime.date.fromisoformat(value)
+            except ValueError:
+                return f"Поле '{field.name}' должно быть корректной датой в формате ГГГГ-ММ-ДД."
 
         return None
 
@@ -511,7 +518,7 @@ class ChecklistSignSerializer(serializers.Serializer):
     """
     role = serializers.ChoiceField(
         choices=ChecklistSignature.Role,
-        help_text="Роль подписанта (например, OPERATOR_OUT)"
+        help_text="Роль подписанта (например, APPROVER)"
     )
     user_uid = serializers.CharField(
         max_length=255,

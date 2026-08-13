@@ -68,7 +68,8 @@ class TemplateField(models.Model):
         INTEGER = 'INTEGER', 'Целое число'
         CHOICE = 'CHOICE', 'Выбор из списка'
         CHECKBOX = 'CHECKBOX', 'Чекбокс'
-        AUTO = 'AUTO', 'Автозаполняемое значение'
+        DATE = 'DATE', 'Дата'
+        AUTO_DATE = 'AUTO DATE', 'Автоматическая дата'
 
     group = models.ForeignKey(
         TemplateFieldGroup, on_delete=models.CASCADE, related_name='fields'
