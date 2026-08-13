@@ -373,7 +373,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
         ChecklistSignature.objects.create(
             result=result,
-            role=ChecklistSignature.Role.OPERATOR_OUT,
+            role=ChecklistSignature.Role.AUTHOR,
             user_uid=result.user_uid,
         )
 
@@ -385,6 +385,12 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         Атомарно создает обновленный экземпляр заполненного чек-листа,
         помечая старый как устаревший.
         """
+        if instance.is_completed:
+            raise ValidationError(
+                "Невозможно изменить анкету: "
+                "она уже утверждена и закрыта для редактирования."
+            )
+
         instance.is_deprecated = True
         instance.save(update_fields=['is_deprecated'])
 
@@ -497,3 +503,17 @@ class ChecklistSignatureSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChecklistSignature
         fields = ['role', 'role_display', 'user_uid', 'signed_at']
+
+
+class ChecklistSignSerializer(serializers.Serializer):
+    """
+    DTO для валидации запроса на подписание анкеты.
+    """
+    role = serializers.ChoiceField(
+        choices=ChecklistSignature.Role,
+        help_text="Роль подписанта (например, OPERATOR_OUT)"
+    )
+    user_uid = serializers.CharField(
+        max_length=255,
+        help_text="UID пользователя, ставящего подпись"
+    )

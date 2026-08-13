@@ -163,15 +163,9 @@ class ChecklistResult(models.Model):
         return f'{status}Анкета {self.id} от {self.user_uid}'
 
     def check_and_complete(self):
-        """Проверяет наличие всех трех подписей и завершает анкету."""
-        required_roles = {
-            ChecklistSignature.Role.OPERATOR_OUT,
-            ChecklistSignature.Role.OPERATOR_IN,
-            ChecklistSignature.Role.MASTER,
-        }
-        current_roles = set(self.signatures.values_list('role', flat=True))
-
-        if required_roles.issubset(current_roles):
+        """Проверяет наличие Утверждающего и завершает анкету."""
+        if self.signatures.filter(
+                role=ChecklistSignature.Role.APPROVER).exists():
             self.is_completed = True
             self.save(update_fields=['is_completed'])
 
@@ -208,9 +202,10 @@ class ChecklistAnswer(models.Model):
 class ChecklistSignature(models.Model):
     """Модель электронных подписей для анкеты."""
     class Role(models.TextChoices):
-        OPERATOR_OUT = 'OPERATOR_OUT', 'Сдающий оператор'
-        OPERATOR_IN = 'OPERATOR_IN', 'Принимающий оператор'
-        MASTER = 'MASTER', 'Мастер смены'
+        """Типы пользователей, представленные в системе"""
+        AUTHOR = 'AUTHOR', 'Составитель'
+        APPROVER = 'APPROVER', 'Утверждающий (Подписант)'
+        READER = 'READER', 'Ознакомлен (Читатель)'
 
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='signatures'
