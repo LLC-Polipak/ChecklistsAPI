@@ -8,8 +8,10 @@ class Template(models.Model):
     Определяет набор полей, которые необходимо заполнить
     при выполнении осмотра, приемки или сдачи оборудования.
     """
+
     class ChecklistTypes(models.TextChoices):
         """Возможные типы чек-листов."""
+
         INSPECTION = 'INSPECTION', 'Осмотр'
         ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
         HANDOVER = 'HANDOVER', 'Сдача'
@@ -36,6 +38,7 @@ class TemplateFieldGroup(models.Model):
     Модель для группировки полей в шаблоне.
     Включает в себя ссылку на шаблон, имя группы, а также порядок расположения в шаблоне.
     """
+
     template = models.ForeignKey(
         'Template', on_delete=models.CASCADE, related_name='groups'
     )
@@ -62,8 +65,10 @@ class TemplateField(models.Model):
     Для полей с типом ``CHOICE`` список допустимых значений
     хранится в модели ``FieldChoice``.
     """
+
     class FieldTypes(models.TextChoices):
         """Возможные типы полей, которые могут быть представлены в шаблоне."""
+
         STRING = 'STRING', 'Строка'
         INTEGER = 'INTEGER', 'Целое число'
         CHOICE = 'CHOICE', 'Выбор из списка'
@@ -101,6 +106,7 @@ class FieldChoice(models.Model):
     Используется для формирования списка вариантов,
     доступных пользователю при заполнении чек-листа.
     """
+
     field = models.ForeignKey(
         TemplateField, on_delete=models.CASCADE, related_name='choices'
     )
@@ -125,8 +131,10 @@ class ChecklistResult(models.Model):
     Ответы на отдельные поля хранятся
     в связанных объектах ``ChecklistAnswer``.
     """
+
     class ShiftType(models.TextChoices):
         """Возможные варианты смены."""
+
         DAY = 'DAY', 'Дневная'
         NIGHT = 'NIGHT', 'Ночная'
 
@@ -165,8 +173,7 @@ class ChecklistResult(models.Model):
 
     def check_and_complete(self):
         """Проверяет наличие Утверждающего и завершает анкету."""
-        if self.signatures.filter(
-                role=ChecklistSignature.Role.APPROVER).exists():
+        if self.signatures.filter(role=ChecklistSignature.Role.APPROVER).exists():
             self.is_completed = True
             self.save(update_fields=['is_completed'])
 
@@ -178,6 +185,7 @@ class ChecklistAnswer(models.Model):
     Связывает заполненный чек-лист с полем шаблона
     и хранит введенное пользователем значение.
     """
+
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='answers'
     )
@@ -202,8 +210,10 @@ class ChecklistAnswer(models.Model):
 
 class ChecklistSignature(models.Model):
     """Модель электронных подписей для анкеты."""
+
     class Role(models.TextChoices):
-        """Типы пользователей, представленные в системе"""
+        """Типы пользователей, представленные в системе."""
+
         AUTHOR = 'AUTHOR', 'Составитель'
         APPROVER = 'APPROVER', 'Утверждающий (Подписант)'
         READER = 'READER', 'Ознакомлен (Читатель)'

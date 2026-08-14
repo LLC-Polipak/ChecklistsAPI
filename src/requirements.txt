@@ -7,8 +7,14 @@ python-dotenv==1.2.*
 # --- Database ---
 psycopg[binary]==3.2.*
 
+# --- Data & Integrations ---
+openpyxl==3.1.*
+
 # --- API ---
 djangorestframework==3.16.*
+
+# --- Documentation ---
+drf-spectacular==0.29.*
 
 # --- Production ---
 gunicorn==23.0.*

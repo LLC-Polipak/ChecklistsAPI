@@ -1,17 +1,26 @@
-from django.db.models import Q
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import inline_serializer, extend_schema
-from rest_framework import status, viewsets, serializers
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import filters, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from apps.checklists.export_service import ChecklistExcelExporter
 from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
-from apps.checklists.models import ChecklistResult, ChecklistSignature, Template
+from apps.checklists.models import ChecklistResult, Template
+from apps.checklists.repositories import (
+    DjangoResultRepository,
+    DjangoTemplateRepository,
+)
 from apps.checklists.serializers import (
     ChecklistResultCreateSerializer,
     ChecklistResultListSerializer,
-    TemplateSerializer, ChecklistSignSerializer,
+    ChecklistSignSerializer,
+    TemplateSerializer,
 )
+from apps.checklists.services import ChecklistResultService, TemplateService
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -20,12 +29,31 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
     Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
     """
+
     queryset = Template.objects.prefetch_related('groups__fields__choices')
 
     serializer_class = TemplateSerializer
 
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = TemplateFilter
+
+    search_fields = ['equipment_uid', 'groups__fields__name']
+    ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
+
+    def perform_create(self, serializer):
+        service = TemplateService(DjangoTemplateRepository())
+        serializer.instance = service.create_template(serializer.validated_data)
+
+    def perform_update(self, serializer):
+        service = TemplateService(DjangoTemplateRepository())
+        serializer.instance = service.update_template(
+            serializer.instance, serializer.validated_data
+        )
 
     def destroy(self, request, *args, **kwargs):
         """
@@ -37,17 +65,15 @@ class TemplateViewSet(viewsets.ModelViewSet):
             HTTP 404: Шаблон с таким параметром не найден.
         """
         instance = self.get_object()
+        service = TemplateService(DjangoTemplateRepository())
 
-        if instance.results.exists():
+        try:
+            service.delete_template(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ValidationError as e:
             return Response(
-                {
-                    'error': 'Невозможно удалить шаблон, '
-                    'так как по нему уже есть заполненные анкеты.'
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
             )
-
-        return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
@@ -57,13 +83,10 @@ class TemplateViewSet(viewsets.ModelViewSet):
         """
         current_template = self.get_object()
 
-        history_queryset = (
-            Template.objects.filter(
-                equipment_uid=current_template.equipment_uid,
-                checklist_type=current_template.checklist_type,
-            )
-            .prefetch_related('fields__choices')
-            .order_by('-created_at')
+        repo = DjangoTemplateRepository()
+        history_queryset = repo.get_template_history(
+            equipment_uid=current_template.equipment_uid,
+            checklist_type=current_template.checklist_type,
         )
 
         serializer = self.get_serializer(history_queryset, many=True)
@@ -87,10 +110,8 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Возвращает список уникальных UID оборудования из активных шаблонов.
         Идеально для подсказок (autocomplete) на фронтенде.
         """
-        uids = (self.get_queryset()
-                .values_list('equipment_uid', flat=True).distinct())
-
-        return Response(list(uids))
+        repo = DjangoTemplateRepository()
+        return Response(repo.get_unique_equipments())
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -101,14 +122,28 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     и выполняет динамическую валидацию типов данных.
     - GET: возвращает историю заполненных анкет.
     - GET /history/ : возвращает полную историю всех изменений анкеты.
+    - POST /sign/ : подписывает анкету пользователем с определенной ролью.
     """
-    queryset = (ChecklistResult.objects.select_related('template')
-    .prefetch_related(
-        'answers__field'
-    ))
 
-    filter_backends = [DjangoFilterBackend]
+    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
+        'answers__field'
+    )
+
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = ChecklistResultFilter
+
+    search_fields = [
+        'user_uid',
+        'template__equipment_uid',
+        'answers__value',
+        'answers__comment',
+    ]
+    ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
 
     def get_queryset(self):
         """
@@ -135,6 +170,35 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
 
+    def perform_create(self, serializer):
+        service = ChecklistResultService(DjangoResultRepository())
+        serializer.instance = service.submit_result(serializer.validated_data)
+
+    def perform_update(self, serializer):
+        service = ChecklistResultService(DjangoResultRepository())
+        serializer.instance = service.update_result(
+            serializer.instance, serializer.validated_data
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Отвечает за удаление анкеты чек-листа.
+
+        Returns:
+            HTTP 204: Удаление анкеты прошло успешно.
+            HTTP 404: Анкета с таким параметром не найдена.
+        """
+        instance = self.get_object()
+        service = ChecklistResultService(DjangoResultRepository())
+
+        try:
+            service.delete_result(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ValidationError as e:
+            return Response(
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+            )
+
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         """
@@ -142,41 +206,32 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Включает оригинал и все его исправления, отсортированные от новых к старым.
         """
         current_result = self.get_object()
-
         origin_id = current_result.origin_id or current_result.id
 
-        history_queryset = (
-            ChecklistResult.objects.filter(Q(id=origin_id)
-                                           | Q(origin_id=origin_id))
-            .select_related('template')
-            .prefetch_related('answers__field')
-            .order_by('-created_at')
-        )
+        repo = DjangoResultRepository()
+        history_queryset = repo.get_result_history(origin_id=origin_id)
 
         serializer = self.get_serializer(history_queryset, many=True)
 
         return Response(serializer.data)
 
     @extend_schema(
-        summary="Подписать анкету",
-        description="Роль APPROVER закрывает анкету от изменений. "
-                    "READER может подписывать даже закрытую анкету.",
+        summary='Подписать анкету',
+        description='Роль APPROVER закрывает анкету от изменений. '
+        'READER может подписывать даже закрытую анкету.',
         request=ChecklistSignSerializer,
         responses={
             200: inline_serializer(
                 name='SignSuccessResponse',
                 fields={
                     'message': serializers.CharField(),
-                    'is_completed': serializers.BooleanField()
-                }
+                    'is_completed': serializers.BooleanField(),
+                },
             ),
             400: inline_serializer(
-                name='SignErrorResponse',
-                fields={
-                    'error': serializers.CharField()
-                }
-            )
-        }
+                name='SignErrorResponse', fields={'error': serializers.CharField()}
+            ),
+        },
     )
     @action(detail=True, methods=['post'])
     def sign(self, request, pk=None):
@@ -184,49 +239,46 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Эндпоинт для подписания анкеты.
         Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}.
         """
-        result = self.get_object()
-
         serializer = ChecklistSignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        role = serializer.validated_data['role']
-        user_uid = serializer.validated_data['user_uid']
+        service = ChecklistResultService(DjangoResultRepository())
 
-        if result.is_deprecated:
-            return Response(
-                {
-                    "error":
-                        "Нельзя подписать устаревшую анкету"
-                }, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if result.is_completed and role != ChecklistSignature.Role.READER:
-            return Response(
-                {
-                    "error": "Анкета уже закрыта. "
-                             "Допускаются только подписи об ознакомлении (READER)."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        from django.utils.timezone import now
-
-        signature, created = ChecklistSignature.objects.get_or_create(
-            result=result,
-            role=role,
-            defaults={'user_uid': user_uid}
+        result, created = service.sign_result(
+            result_id=pk,
+            role=serializer.validated_data['role'],
+            user_uid=serializer.validated_data['user_uid'],
         )
 
-        if not created:
-            signature.user_uid = user_uid
-            signature.signed_at = now()
-            signature.save(update_fields=['user_uid', 'signed_at'])
+        msg = 'Анкета успешно подписана!' if created else 'Подпись успешно обновлена!'
 
-        result.check_and_complete()
+        return Response(
+            {'message': msg, 'is_completed': result.is_completed},
+            status=status.HTTP_200_OK,
+        )
 
-        status_msg = "Анкета успешно подписана!" if created \
-            else "Подпись успешно обновлена!"
+    @extend_schema(
+        summary='Экспорт анкеты в Excel',
+        description='Генерирует Excel-файл со всеми ответами, комментариями и подписями.',
+        responses={200: OpenApiTypes.BINARY},
+    )
+    @action(detail=True, methods=['get'])
+    def export_excel(self, request, pk=None):
+        """
+        Эндопинт для генерации файла Excel из заполненной анкеты чек-листа.
+        Возвращает готовый Excel-файл.
+        """
+        result = self.get_object()
 
-        return Response({
-            "message": status_msg,
-            "is_completed": result.is_completed
-        }, status=status.HTTP_200_OK)
+        excel_bytes = ChecklistExcelExporter.export(result)
+
+        response = HttpResponse(
+            excel_bytes,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+
+        safe_uid = str(result.template.equipment_uid).replace(' ', '_')
+        filename = f'Checklist_Result_{result.id}_{safe_uid}.xlsx'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response

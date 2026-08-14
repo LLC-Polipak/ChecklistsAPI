@@ -1,6 +1,5 @@
-import datetime
+import datetime as dt
 
-from django.db import transaction
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
@@ -20,6 +19,7 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
     DTO для вариантов ответов.
     Используется исключительно для полей типа 'CHOICE' (выпадающий список).
     """
+
     class Meta:
         model = FieldChoice
         fields = ['value', 'order']
@@ -30,6 +30,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
     DTO для поля шаблона анкеты.
     Описывает конкретный вопрос, его тип и возможные варианты ответа (если применимо).
     """
+
     choices = FieldChoiceSerializer(many=True, required=False)
     field_type_display = serializers.CharField(
         source='get_field_type_display', read_only=True
@@ -69,12 +70,14 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
 
 class AnswerItemSerializer(serializers.Serializer):
     """Вспомогательный DTO для ответов с комментарием."""
+
     value = serializers.CharField(allow_blank=True)
     comment = serializers.CharField(allow_blank=True, required=False, default='')
 
 
 class TemplateFieldGroupSerializer(serializers.ModelSerializer):
     """Вспомогательный DTO для представления группы полей шаблона."""
+
     fields = TemplateFieldSerializer(many=True)
 
     class Meta:
@@ -88,6 +91,7 @@ class TemplateSerializer(serializers.ModelSerializer):
     Записываемый вложенный сериализатор для шаблона.
     Преобразует глубокий JSON от клиента в нормализованную реляционную структуру БД.
     """
+
     groups = TemplateFieldGroupSerializer(many=True)
     checklist_type_display = serializers.CharField(
         source='get_checklist_type_display', read_only=True
@@ -133,85 +137,6 @@ class TemplateSerializer(serializers.ModelSerializer):
                 )
         return value
 
-    @transaction.atomic
-    def create(self, validated_data):
-        """Атомарно сохраняет заголовок шаблон, его поля и варианты выбора."""
-        groups_data = validated_data.pop('groups', [])
-        equipment_uid = validated_data.get('equipment_uid')
-        checklist_type = validated_data.get('checklist_type')
-
-        Template.objects.filter(
-            equipment_uid=equipment_uid,
-            checklist_type=checklist_type,
-            is_deprecated=False,
-        ).update(is_deprecated=True)
-
-        template = Template.objects.create(**validated_data)
-
-        self._create_group_field_data(template, groups_data)
-
-        return template
-
-    @transaction.atomic
-    def update(self, instance, validated_data):
-        """
-        Атомарно изменяет шаблон, его поля и варианты выбора.
-
-        Если по изменяемому шаблону существует заполненный чек-лист,
-        выкидывает ошибку ValidationError.
-        """
-        if instance.results.exists():
-            raise ValidationError(
-                'Невозможно изменить шаблон, так как по нему уже есть заполненные анкеты. '
-                'Создайте новый шаблон.'
-            )
-
-        if (
-            'equipment_uid' in validated_data
-            and validated_data['equipment_uid'] != instance.equipment_uid
-        ):
-            raise ValidationError({
-                'equipment_uid': 'Нельзя изменить UID оборудования у существующего шаблона.'
-            })
-
-        if (
-            'checklist_type' in validated_data
-            and validated_data['checklist_type'] != instance.checklist_type
-        ):
-            raise ValidationError({
-                'checklist_type': 'Нельзя изменить тип чек-листа у существующего шаблона.'
-            })
-
-        groups_data = validated_data.pop('groups', None)
-
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-
-        instance.save()
-
-        if groups_data is not None:
-            instance.groups.all().delete()
-
-            self._create_group_field_data(instance, groups_data)
-
-        return instance
-
-    @staticmethod
-    def _create_group_field_data(instance, groups_data):
-        """Вспомогательный метод для атомарной записи группы полей."""
-        for group_data in groups_data:
-            fields_data = group_data.pop('fields', [])
-            group = TemplateFieldGroup.objects.create(template=instance, **group_data)
-
-            for field_data in fields_data:
-                choices_data = field_data.pop('choices', [])
-                field = TemplateField.objects.create(group=group, **field_data)
-
-                if choices_data:
-                    FieldChoice.objects.bulk_create([
-                        FieldChoice(field=field, **c) for c in choices_data
-                    ])
-
     def validate_fields(self, value):
         """Проверяет, что порядковые номера полей не дублируются."""
         orders = [
@@ -232,6 +157,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     Динамически валидирует типы присланных строковых данных, приводимость к INTEGER,
     допустимость Boolean, наличие значения в списке FieldChoice.
     """
+
     equipment_uid = serializers.CharField(
         max_length=255, write_only=True, required=False
     )
@@ -265,16 +191,12 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         if self.instance:
             template = self.instance.template
         else:
-            template = (
-                Template.objects.prefetch_related('groups__fields__choices')
-                .filter(
-                    equipment_uid=attrs.get('equipment_uid'),
-                    checklist_type=attrs.get('checklist_type'),
-                    is_deprecated=False,
-                )
-                .first()
-            )
+            from apps.checklists.repositories import DjangoTemplateRepository
 
+            repo = DjangoTemplateRepository()
+            template = repo.get_active_template(
+                attrs.get('equipment_uid'), attrs.get('checklist_type')
+            )
             if not template:
                 raise ValidationError(
                     'Активный шаблон для данного оборудования не найден.'
@@ -357,87 +279,14 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 return f"Поле '{field.name}' должно быть логическим (true/false)."
         elif field.field_type == TemplateField.FieldTypes.DATE:
             try:
-                datetime.date.fromisoformat(value)
+                dt.date.fromisoformat(value)
             except ValueError:
                 return f"Поле '{field.name}' должно быть корректной датой в формате ГГГГ-ММ-ДД."
 
         return None
 
-    @transaction.atomic
-    def create(self, validated_data):
-        """
-        Сохранение провалидированных результатов анкетирования.
-        Создает заголовок результата и привязывает к нему массив ответов (ResultAnswer).
-        """
-        result = ChecklistResult.objects.create(
-            template=validated_data['template'],
-            user_uid=validated_data['user_uid'],
-            shift_number=validated_data.get('shift_number', ''),
-            shift_time=validated_data.get('shift_time', ''),
-        )
-
-        self._create_checklist_answers(result, validated_data)
-
-        ChecklistSignature.objects.create(
-            result=result,
-            role=ChecklistSignature.Role.AUTHOR,
-            user_uid=result.user_uid,
-        )
-
-        return result
-
-    @transaction.atomic
-    def update(self, instance, validated_data):
-        """
-        Атомарно создает обновленный экземпляр заполненного чек-листа,
-        помечая старый как устаревший.
-        """
-        if instance.is_completed:
-            raise ValidationError(
-                "Невозможно изменить анкету: "
-                "она уже утверждена и закрыта для редактирования."
-            )
-
-        instance.is_deprecated = True
-        instance.save(update_fields=['is_deprecated'])
-
-        new_result = ChecklistResult.objects.create(
-            template=instance.template,
-            user_uid=validated_data.get('user_uid', instance.user_uid),
-            shift_number=validated_data.get('shift_number', instance.shift_number),
-            shift_time=validated_data.get('shift_time', instance.shift_time),
-            origin=instance.origin or instance,
-        )
-
-        self._create_checklist_answers(new_result, validated_data)
-
-        for old_sig in instance.signatures.all():
-            ChecklistSignature.objects.create(
-                result=new_result,
-                role=old_sig.role,
-                user_uid=old_sig.user_uid,
-                signed_at=old_sig.signed_at,
-            )
-
-        return new_result
-
-    @staticmethod
-    def _create_checklist_answers(result, validated_data):
-        """Вспомогательный метод для записи ответов анкеты."""
-        answers = [
-            ChecklistAnswer(
-                result=result,
-                field=item['field'],
-                value=item['value'],
-                comment=item['comment'],
-            )
-            for item in validated_data['validated_answers']
-        ]
-
-        ChecklistAnswer.objects.bulk_create(answers)
-
     def to_representation(self, instance):
-        """Переопределяем выдачи ответа после успешного POST/PUT запроса."""
+        """Выдачи ответа после успешного POST/PUT запроса."""
         return ChecklistResultListSerializer(instance, context=self.context).data
 
 
@@ -446,6 +295,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
     DTO для вывода конкретного ответа пользователя.
     Подтягивает названия и типы полей из связанной таблицы для удобства фронтенда.
     """
+
     field_name = serializers.CharField(source='field.name')
     field_type = serializers.CharField(source='field.field_type')
 
@@ -466,9 +316,8 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
 
 
 class ChecklistResultListSerializer(serializers.ModelSerializer):
-    """
-    DTO для вывода истории заполненных чек-листов (включая вложенные ответы).
-    """
+    """DTO для вывода истории заполненных чек-листов (включая вложенные ответы)."""
+
     checklist_type = serializers.CharField(
         source='template.checklist_type', read_only=True
     )
@@ -501,11 +350,9 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
 
 
 class ChecklistSignatureSerializer(serializers.ModelSerializer):
-    """
-    DTO для представления подписей анкет чек-листа.
-    """
-    role_display = serializers.CharField(source='get_role_display',
-                                         read_only=True)
+    """DTO для представления подписей анкет чек-листа."""
+
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
 
     class Meta:
         model = ChecklistSignature
@@ -513,14 +360,12 @@ class ChecklistSignatureSerializer(serializers.ModelSerializer):
 
 
 class ChecklistSignSerializer(serializers.Serializer):
-    """
-    DTO для валидации запроса на подписание анкеты.
-    """
+    """DTO для валидации запроса на подписание анкеты."""
+
     role = serializers.ChoiceField(
         choices=ChecklistSignature.Role,
-        help_text="Роль подписанта (например, APPROVER)"
+        help_text='Роль подписанта (например, APPROVER)',
     )
     user_uid = serializers.CharField(
-        max_length=255,
-        help_text="UID пользователя, ставящего подпись"
+        max_length=255, help_text='UID пользователя, ставящего подпись'
     )
