@@ -3,6 +3,7 @@ import datetime as dt
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
+from apps.checklists.constants import FieldTypes, ShiftTypes, SignatureRoles
 from apps.checklists.models import (
     ChecklistAnswer,
     ChecklistResult,
@@ -57,7 +58,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
         field_type = attrs.get('field_type')
         choices = attrs.get('choices', [])
 
-        if field_type == TemplateField.FieldTypes.CHOICE:
+        if field_type == FieldTypes.CHOICE:
             if not choices:
                 raise serializers.ValidationError({
                     'choices': 'Для типа "Выбор из списка" необходимо передать хотя бы один вариант ответа.'
@@ -115,7 +116,7 @@ class TemplateSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at', 'has_results']
 
     def get_has_results(self, obj):
-        """Проверяет существует ли на данный шаблон заполненная анкета."""
+        """Проверяет существование заполненной анкеты на данный шаблон."""
         return obj.results.exists()
 
     def validate_groups(self, value):
@@ -166,10 +167,10 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     user_uid = serializers.CharField(max_length=36)
 
     shift_number = serializers.ChoiceField(
-        choices=ChecklistResult.ShiftType, required=False
+        choices=ShiftTypes, required=False
     )
     shift_time = serializers.DateTimeField(required=False, allow_null=True)
-
+    is_draft = serializers.BooleanField(default=False)
     answers = serializers.DictField(child=AnswerItemSerializer(), allow_empty=True)
 
     def validate(self, attrs):
@@ -187,6 +188,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         Возвращает подготовленный и безопасный список данных для метода create().
         """
         answers_data = attrs.get('answers', {})
+        is_draft = attrs.get('is_draft', False)
 
         if self.instance:
             template = self.instance.template
@@ -208,14 +210,13 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
             for f in group.fields.all():
                 template_fields[str(f.id)] = f
 
-        required_fields = {str(f.id) for f in template_fields.values() if f.is_required}
-
-        missing = required_fields - set(answers_data.keys())
-
-        if missing:
-            raise ValidationError(
-                f'Пропущены обязательные поля (ID): {", ".join(missing)}'
-            )
+        if not is_draft:
+            required_fields = {str(f.id) for f in template_fields.values() if f.is_required}
+            missing = required_fields - set(answers_data.keys())
+            if missing:
+                raise ValidationError(
+                    f'Пропущены обязательные поля (ID): {", ".join(missing)}'
+                )
 
         errors = {}
         validated_answers = []
@@ -229,16 +230,12 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
             value = answer_obj['value']
             comment = answer_obj.get('comment', '')
 
-            if not field.is_required and value == '':
-                validated_answers.append({
-                    'field': field,
-                    'value': '',
-                    'comment': comment,
-                })
+            if field.is_required and value == "" and not is_draft:
+                errors[f_id] = "Обязательное поле не может быть пустым."
                 continue
 
-            if field.is_required and value == '':
-                errors[f_id] = 'Обязательное поле не может быть пустым.'
+            if value == "":
+                validated_answers.append({'field': field, 'value': value, 'comment': comment})
                 continue
 
             error_msg = self._validate_single_field(field, value)
@@ -266,18 +263,18 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         Возвращает текст ошибки или None.
         """
         if (
-            field.field_type == TemplateField.FieldTypes.INTEGER
+            field.field_type == FieldTypes.INTEGER
             and not value.lstrip('-').isdigit()
         ):
             return f"Поле '{field.name}' должно быть целым числом."
-        if field.field_type == TemplateField.FieldTypes.CHOICE:
+        if field.field_type == FieldTypes.CHOICE:
             valid_choices = [c.value for c in field.choices.all()]
             if value not in valid_choices:
                 return f"Значение '{value}' недопустимо. Варианты: {valid_choices}"
-        elif field.field_type == TemplateField.FieldTypes.CHECKBOX:
+        elif field.field_type == FieldTypes.CHECKBOX:
             if value.lower() not in {'true', 'false', '1', '0'}:
                 return f"Поле '{field.name}' должно быть логическим (true/false)."
-        elif field.field_type == TemplateField.FieldTypes.DATE:
+        elif field.field_type == FieldTypes.DATE:
             try:
                 dt.date.fromisoformat(value)
             except ValueError:
@@ -363,7 +360,7 @@ class ChecklistSignSerializer(serializers.Serializer):
     """DTO для валидации запроса на подписание анкеты."""
 
     role = serializers.ChoiceField(
-        choices=ChecklistSignature.Role,
+        choices=SignatureRoles,
         help_text='Роль подписанта (например, APPROVER)',
     )
     user_uid = serializers.CharField(

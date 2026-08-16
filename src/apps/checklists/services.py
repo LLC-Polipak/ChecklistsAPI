@@ -1,16 +1,29 @@
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
+from apps.checklists.constants import SignatureRoles
 from apps.checklists.interfaces import IResultRepository, ITemplateRepository
-from apps.checklists.models import ChecklistSignature
 
 
 class TemplateService:
+    """
+    Сервис управления бизнес-логикой Шаблонов чек-листов.
+    Отвечает за версионирование (создание новых версий поверх старых)
+    и проверку целостности данных при редактировании.
+    """
     def __init__(self, repo: ITemplateRepository):
         self.repo = repo
 
     @transaction.atomic
     def create_template(self, validated_data: dict):
+        """
+        Создает новую версию шаблона.
+
+        Бизнес-правила:
+        1. Если для данного оборудования и типа проверки уже существовал шаблон,
+        он помечается как устаревший (Soft Delete / Deprecation).
+        2. Иерархия (Группы -> Поля -> Варианты выбора) сохраняется атомарно.
+        """
         groups_data = validated_data.pop('groups', [])
 
         self.repo.deprecate_templates(
@@ -21,6 +34,12 @@ class TemplateService:
 
     @transaction.atomic
     def update_template(self, instance, validated_data: dict):
+        """
+        Полностью перезаписывает иерархию полей существующего шаблона.
+        Шаблон категорически запрещено изменять, если по нему уже заполнялись анкеты,
+        так как это нарушит структуру исторических данных. Для изменения нужно
+        создавать новую версию шаблона через метод create_template.
+        """
         if instance.results.exists():
             raise ValidationError(
                 'Невозможно изменить шаблон, по нему уже есть анкеты.'
@@ -41,6 +60,14 @@ class TemplateService:
 
     @transaction.atomic
     def delete_template(self, instance):
+        """
+        Удаляет шаблон с возможностью отката версии.
+
+        Бизнес-правила:
+        1. Нельзя удалить шаблон, если по нему есть заполненные результаты.
+        2. При удалении текущего активного шаблона система попытается "воскресить"
+        предыдущую устаревшую версию, чтобы оборудование не осталось без бланка проверки.
+        """
         if instance.results.exists():
             raise ValidationError(
                 'Невозможно удалить шаблон, по нему уже есть заполненные анкеты.'
@@ -54,26 +81,52 @@ class TemplateService:
 
 
 class ChecklistResultService:
+    """
+    Сервис управления бизнес-логикой Заполненных Анкет (Результатов).
+    Отвечает за Аудиторский след (Audit Trail), проверку подписей и
+    отслеживание состояний (Черновик / Чистовик / Завершено).
+    """
     def __init__(self, repo: IResultRepository):
         self.repo = repo
 
     @transaction.atomic
     def submit_result(self, validated_data: dict):
+        """
+        Первичное сохранение ответов пользователя.
+        Составитель анкеты автоматически подписывает документ ролью AUTHOR.
+        """
         answers_data = validated_data.pop('validated_answers')
+
+        validated_data.pop('answers', None)
+        validated_data.pop('equipment_uid', None)
+        validated_data.pop('checklist_type', None)
 
         result = self.repo.save_result_with_answers(validated_data, answers_data)
 
         self.repo.upsert_signature(
-            result, ChecklistSignature.Role.AUTHOR, result.user_uid
+            result, SignatureRoles.AUTHOR, result.user_uid
         )
         return result
 
     @transaction.atomic
     def update_result(self, instance, validated_data: dict):
+        """
+        Обновление ответов анкеты с сохранением Аудиторского следа.
+
+        Бизнес-правила:
+        1. Утвержденную (закрытую) анкету изменять нельзя.
+        2. Вместо перезаписи данных старая анкета помечается как устаревшая (is_deprecated=True),
+            и создается её полная копия с новыми ответами.
+        3. Все существующие подписи переносятся на новую версию анкеты.
+        """
         if instance.is_completed:
             raise ValidationError('Невозможно изменить анкету: она уже утверждена.')
 
         answers_data = validated_data.pop('validated_answers')
+
+        validated_data.pop('answers', None)
+        validated_data.pop('equipment_uid', None)
+        validated_data.pop('checklist_type', None)
 
         self.repo.deprecate_result(instance)
 
@@ -86,11 +139,24 @@ class ChecklistResultService:
         return new_result
 
     def sign_result(self, result_id: int, role: str, user_uid: str):
+        """
+        Добавление электронной подписи к анкете.
+
+        Бизнес-правила:
+        1. Черновик (is_draft=True) подписать нельзя.
+        2. Устаревшую версию (is_deprecated=True) подписать нельзя.
+        3. Если анкета уже закрыта, новую подпись может поставить только Читатель (READER).
+        4. Если подпись ставит Утверждающий (APPROVER), анкета переходит в статус Завершено (is_completed=True).
+        """
         result = self.repo.get_result_by_id(result_id)
+
+        if result.is_draft:
+            raise ValidationError("Нельзя подписать черновик. Сначала сохраните анкету как чистовик.")
 
         if result.is_deprecated:
             raise ValidationError('Нельзя подписать устаревшую анкету.')
-        if result.is_completed and role != ChecklistSignature.Role.READER:
+
+        if result.is_completed and role != SignatureRoles.READER:
             raise ValidationError('Анкета закрыта. Разрешены только подписи Читателя.')
 
         _signature, created = self.repo.upsert_signature(result, role, user_uid)
@@ -100,6 +166,11 @@ class ChecklistResultService:
 
     @transaction.atomic
     def delete_result(self, instance):
+        """
+        Удаление анкеты.
+        При удалении активной версии (ошибочное исправление),
+        система "воскрешает" предыдущую устаревшую версию.
+        """
         origin_id = instance.origin_id or instance.id
 
         self.repo.delete_result(instance)

@@ -1,6 +1,6 @@
 **/.idea
 **/__pycache__
 **/.venv
-.env
+src/.env
 **/keys
 .local
