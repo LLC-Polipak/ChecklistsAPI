@@ -26,7 +26,6 @@ from apps.checklists.services import ChecklistResultService, TemplateService
 class TemplateViewSet(viewsets.ModelViewSet):
     """
     Управление шаблонами чек-листов (CRUD).
-
     Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
     """
 
@@ -46,10 +45,22 @@ class TemplateViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def perform_create(self, serializer):
+        """
+        Переопределение стандартного процесса сохранения DRF.
+        Вместо вызова serializer.save(), мы делегируем бизнес-логику в слой Сервисов (TemplateService).
+        Сервис сам позаботится о версионировании (устаревании прошлых шаблонов) и
+        атомарном сохранении всей иерархии (Группы -> Поля -> Варианты).
+        """
         service = TemplateService(DjangoTemplateRepository())
         serializer.instance = service.create_template(serializer.validated_data)
 
     def perform_update(self, serializer):
+        """
+        Переопределение стандартного процесса обновления DRF.
+        Делегирует обновление в Сервис, который проверяет бизнес-правила
+        (например, запрет редактирования используемых шаблонов) и полностью
+        перезаписывает структуру групп и полей.
+        """
         service = TemplateService(DjangoTemplateRepository())
         serializer.instance = service.update_template(
             serializer.instance, serializer.validated_data
@@ -171,10 +182,20 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         return ChecklistResultListSerializer
 
     def perform_create(self, serializer):
+        """
+        Переопределение сохранения новой анкеты.
+        Передает провалидированные данные в ChecklistResultService, который
+        сохраняет ответы и автоматически ставит подпись составителя (AUTHOR).
+        """
         service = ChecklistResultService(DjangoResultRepository())
         serializer.instance = service.submit_result(serializer.validated_data)
 
     def perform_update(self, serializer):
+        """
+        Переопределение обновления заполненной анкеты.
+        Сервис отвечает за Аудиторский след (Audit Trail): вместо изменения текущей записи,
+        он помечает ее как устаревшую и создает новую версию с переносом всех старых подписей.
+        """
         service = ChecklistResultService(DjangoResultRepository())
         serializer.instance = service.update_result(
             serializer.instance, serializer.validated_data

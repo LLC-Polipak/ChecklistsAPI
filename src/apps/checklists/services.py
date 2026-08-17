@@ -11,8 +11,9 @@ class TemplateService:
     Отвечает за версионирование (создание новых версий поверх старых)
     и проверку целостности данных при редактировании.
     """
-    def __init__(self, repo: ITemplateRepository):
-        self.repo = repo
+
+    def __init__(self, repository: ITemplateRepository):
+        self.repository = repository
 
     @transaction.atomic
     def create_template(self, validated_data: dict):
@@ -26,11 +27,11 @@ class TemplateService:
         """
         groups_data = validated_data.pop('groups', [])
 
-        self.repo.deprecate_templates(
+        self.repository.deprecate_templates(
             validated_data.get('equipment_uid'), validated_data.get('checklist_type')
         )
 
-        return self.repo.save_template_hierarchy(validated_data, groups_data)
+        return self.repository.save_template_hierarchy(validated_data, groups_data)
 
     @transaction.atomic
     def update_template(self, instance, validated_data: dict):
@@ -54,7 +55,7 @@ class TemplateService:
 
         if groups_data is not None:
             instance.groups.all().delete()
-            self.repo.save_template_hierarchy({'id': instance.id}, groups_data)
+            self.repository.save_template_hierarchy({'id': instance.id}, groups_data)
 
         return instance
 
@@ -76,8 +77,8 @@ class TemplateService:
         equipment_uid = instance.equipment_uid
         checklist_type = instance.checklist_type
 
-        self.repo.delete_template(instance)
-        self.repo.restore_latest_deprecated_template(equipment_uid, checklist_type)
+        self.repository.delete_template(instance)
+        self.repository.restore_latest_deprecated_template(equipment_uid, checklist_type)
 
 
 class ChecklistResultService:
@@ -86,8 +87,9 @@ class ChecklistResultService:
     Отвечает за Аудиторский след (Audit Trail), проверку подписей и
     отслеживание состояний (Черновик / Чистовик / Завершено).
     """
-    def __init__(self, repo: IResultRepository):
-        self.repo = repo
+
+    def __init__(self, repository: IResultRepository):
+        self.repository = repository
 
     @transaction.atomic
     def submit_result(self, validated_data: dict):
@@ -101,11 +103,9 @@ class ChecklistResultService:
         validated_data.pop('equipment_uid', None)
         validated_data.pop('checklist_type', None)
 
-        result = self.repo.save_result_with_answers(validated_data, answers_data)
+        result = self.repository.save_result_with_answers(validated_data, answers_data)
 
-        self.repo.upsert_signature(
-            result, SignatureRoles.AUTHOR, result.user_uid
-        )
+        self.repository.upsert_signature(result, SignatureRoles.AUTHOR, result.user_uid)
         return result
 
     @transaction.atomic
@@ -128,13 +128,13 @@ class ChecklistResultService:
         validated_data.pop('equipment_uid', None)
         validated_data.pop('checklist_type', None)
 
-        self.repo.deprecate_result(instance)
+        self.repository.deprecate_result(instance)
 
         validated_data['origin'] = instance.origin or instance
-        new_result = self.repo.save_result_with_answers(validated_data, answers_data)
+        new_result = self.repository.save_result_with_answers(validated_data, answers_data)
 
         for old_sig in instance.signatures.all():
-            self.repo.upsert_signature(new_result, old_sig.role, old_sig.user_uid)
+            self.repository.upsert_signature(new_result, old_sig.role, old_sig.user_uid)
 
         return new_result
 
@@ -148,10 +148,12 @@ class ChecklistResultService:
         3. Если анкета уже закрыта, новую подпись может поставить только Читатель (READER).
         4. Если подпись ставит Утверждающий (APPROVER), анкета переходит в статус Завершено (is_completed=True).
         """
-        result = self.repo.get_result_by_id(result_id)
+        result = self.repository.get_result_by_id(result_id)
 
         if result.is_draft:
-            raise ValidationError("Нельзя подписать черновик. Сначала сохраните анкету как чистовик.")
+            raise ValidationError(
+                'Нельзя подписать черновик. Сначала сохраните анкету как чистовик.'
+            )
 
         if result.is_deprecated:
             raise ValidationError('Нельзя подписать устаревшую анкету.')
@@ -159,7 +161,7 @@ class ChecklistResultService:
         if result.is_completed and role != SignatureRoles.READER:
             raise ValidationError('Анкета закрыта. Разрешены только подписи Читателя.')
 
-        _signature, created = self.repo.upsert_signature(result, role, user_uid)
+        _signature, created = self.repository.upsert_signature(result, role, user_uid)
         result.check_and_complete()
 
         return result, created
@@ -173,5 +175,5 @@ class ChecklistResultService:
         """
         origin_id = instance.origin_id or instance.id
 
-        self.repo.delete_result(instance)
-        self.repo.restore_latest_deprecated_result(origin_id)
+        self.repository.delete_result(instance)
+        self.repository.restore_latest_deprecated_result(origin_id)

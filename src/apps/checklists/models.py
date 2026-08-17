@@ -1,6 +1,11 @@
 from django.db import models
 
-from apps.checklists.constants import ChecklistTypes, FieldTypes, ShiftTypes, SignatureRoles
+from apps.checklists.constants import (
+    ChecklistTypes,
+    FieldTypes,
+    ShiftTypes,
+    SignatureRoles,
+)
 
 
 class Template(models.Model):
@@ -10,6 +15,7 @@ class Template(models.Model):
     Определяет набор полей, которые необходимо заполнить
     при выполнении осмотра, приемки или сдачи оборудования.
     """
+
     equipment_uid = models.CharField('UID-оборудования', max_length=36, db_index=True)
     checklist_type = models.CharField(
         'Тип чек-листа', max_length=50, choices=ChecklistTypes
@@ -32,6 +38,7 @@ class TemplateFieldGroup(models.Model):
     Модель для группировки полей в шаблоне.
     Включает в себя ссылку на шаблон, имя группы, а также порядок расположения в шаблоне.
     """
+
     template = models.ForeignKey(
         'Template', on_delete=models.CASCADE, related_name='groups'
     )
@@ -58,6 +65,7 @@ class TemplateField(models.Model):
     Для полей с типом ``CHOICE`` список допустимых значений
     хранится в модели ``FieldChoice``.
     """
+
     group = models.ForeignKey(
         TemplateFieldGroup, on_delete=models.CASCADE, related_name='fields'
     )
@@ -88,6 +96,7 @@ class FieldChoice(models.Model):
     Используется для формирования списка вариантов,
     доступных пользователю при заполнении чек-листа.
     """
+
     field = models.ForeignKey(
         TemplateField, on_delete=models.CASCADE, related_name='choices'
     )
@@ -112,6 +121,7 @@ class ChecklistResult(models.Model):
     Ответы на отдельные поля хранятся
     в связанных объектах ``ChecklistAnswer``.
     """
+
     template = models.ForeignKey(
         Template, on_delete=models.PROTECT, related_name='results'
     )
@@ -151,7 +161,7 @@ class ChecklistResult(models.Model):
         if self.is_draft:
             return
 
-        if self.signatures.filter(role=ChecklistSignature.Role.APPROVER).exists():
+        if self.signatures.filter(role=SignatureRoles.APPROVER).exists():
             self.is_completed = True
             self.save(update_fields=['is_completed'])
 
@@ -163,6 +173,7 @@ class ChecklistAnswer(models.Model):
     Связывает заполненный чек-лист с полем шаблона
     и хранит введенное пользователем значение.
     """
+
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='answers'
     )
@@ -187,6 +198,7 @@ class ChecklistAnswer(models.Model):
 
 class ChecklistSignature(models.Model):
     """Модель электронных подписей для анкеты."""
+
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='signatures'
     )

@@ -3,6 +3,7 @@ from django.db import models
 
 class ChecklistTypes(models.TextChoices):
     """Типы чек-листов."""
+
     INSPECTION = 'INSPECTION', 'Осмотр'
     ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
     HANDOVER = 'HANDOVER', 'Сдача'
@@ -10,6 +11,7 @@ class ChecklistTypes(models.TextChoices):
 
 class FieldTypes(models.TextChoices):
     """Типы полей в анкетах."""
+
     STRING = 'STRING', 'Строка'
     INTEGER = 'INTEGER', 'Целое число'
     CHOICE = 'CHOICE', 'Выбор из списка'
@@ -20,12 +22,14 @@ class FieldTypes(models.TextChoices):
 
 class ShiftTypes(models.TextChoices):
     """Варианты рабочих смен."""
+
     DAY = 'DAY', 'Дневная'
     NIGHT = 'NIGHT', 'Ночная'
 
 
 class SignatureRoles(models.TextChoices):
     """Роли для электронных подписей."""
+
     AUTHOR = 'AUTHOR', 'Составитель'
     APPROVER = 'APPROVER', 'Утверждающий (Подписант)'
     READER = 'READER', 'Ознакомлен (Читатель)'

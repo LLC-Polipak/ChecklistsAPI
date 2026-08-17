@@ -13,6 +13,7 @@ from apps.checklists.models import (
     TemplateField,
     TemplateFieldGroup,
 )
+from apps.checklists.repositories import DjangoTemplateRepository
 
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
@@ -166,9 +167,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
     user_uid = serializers.CharField(max_length=36)
 
-    shift_number = serializers.ChoiceField(
-        choices=ShiftTypes, required=False
-    )
+    shift_number = serializers.ChoiceField(choices=ShiftTypes, required=False)
     shift_time = serializers.DateTimeField(required=False, allow_null=True)
     is_draft = serializers.BooleanField(default=False)
     answers = serializers.DictField(child=AnswerItemSerializer(), allow_empty=True)
@@ -190,34 +189,36 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         answers_data = attrs.get('answers', {})
         is_draft = attrs.get('is_draft', False)
 
-        if self.instance:
-            template = self.instance.template
-        else:
-            from apps.checklists.repositories import DjangoTemplateRepository
-
-            repo = DjangoTemplateRepository()
-            template = repo.get_active_template(
-                attrs.get('equipment_uid'), attrs.get('checklist_type')
-            )
-            if not template:
-                raise ValidationError(
-                    'Активный шаблон для данного оборудования не найден.'
-                )
+        template = self._get_active_template(attrs)
 
         template_fields = {}
-
         for group in template.groups.all():
             for f in group.fields.all():
                 template_fields[str(f.id)] = f
 
-        if not is_draft:
-            required_fields = {str(f.id) for f in template_fields.values() if f.is_required}
-            missing = required_fields - set(answers_data.keys())
-            if missing:
-                raise ValidationError(
-                    f'Пропущены обязательные поля (ID): {", ".join(missing)}'
-                )
+        self._check_missing_required_fields(template_fields, answers_data, is_draft)
+        validated_answers = self._process_and_validate_answers(
+            template_fields, answers_data, is_draft
+        )
 
+        attrs['template'] = template
+        attrs['validated_answers'] = validated_answers
+        return attrs
+
+    def _get_active_template(self, attrs):
+        """Извлекает шаблон из БД или из инстанса при обновлении."""
+        if self.instance:
+            return self.instance.template
+
+        template = DjangoTemplateRepository().get_active_template(
+            attrs.get('equipment_uid'), attrs.get('checklist_type')
+        )
+        if not template:
+            raise ValidationError('Активный шаблон для данного оборудования не найден.')
+        return template
+
+    def _process_and_validate_answers(self, template_fields, answers_data, is_draft):
+        """Прогоняет каждый ответ через валидатор типов данных."""
         errors = {}
         validated_answers = []
 
@@ -227,15 +228,27 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 continue
 
             field = template_fields[f_id]
-            value = answer_obj['value']
-            comment = answer_obj.get('comment', '')
+            value = str(answer_obj.get('value', '')).strip()
+            comment = str(answer_obj.get('comment', '')).strip()
 
-            if field.is_required and value == "" and not is_draft:
-                errors[f_id] = "Обязательное поле не может быть пустым."
+            if not field.is_required and value == '':
+                validated_answers.append({
+                    'field': field,
+                    'value': value,
+                    'comment': comment,
+                })
                 continue
 
-            if value == "":
-                validated_answers.append({'field': field, 'value': value, 'comment': comment})
+            if field.is_required and value == '' and not is_draft:
+                errors[f_id] = 'Обязательное поле не может быть пустым.'
+                continue
+
+            if value == '':
+                validated_answers.append({
+                    'field': field,
+                    'value': value,
+                    'comment': comment,
+                })
                 continue
 
             error_msg = self._validate_single_field(field, value)
@@ -251,10 +264,20 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         if errors:
             raise ValidationError(errors)
 
-        attrs['template'] = template
-        attrs['validated_answers'] = validated_answers
+        return validated_answers
 
-        return attrs
+    @staticmethod
+    def _check_missing_required_fields(template_fields, answers_data, is_draft):
+        """Проверяет, все ли обязательные поля присутствуют (если это не черновик)."""
+        if is_draft:
+            return
+
+        required_fields = {str(f.id) for f in template_fields.values() if f.is_required}
+        missing = required_fields - set(answers_data.keys())
+        if missing:
+            raise ValidationError(
+                f'Пропущены обязательные поля (ID): {", ".join(missing)}'
+            )
 
     @staticmethod
     def _validate_single_field(field, value):
@@ -262,10 +285,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         Вспомогательный метод для валидации: проверяет одно поле.
         Возвращает текст ошибки или None.
         """
-        if (
-            field.field_type == FieldTypes.INTEGER
-            and not value.lstrip('-').isdigit()
-        ):
+        if field.field_type == FieldTypes.INTEGER and not value.lstrip('-').isdigit():
             return f"Поле '{field.name}' должно быть целым числом."
         if field.field_type == FieldTypes.CHOICE:
             valid_choices = [c.value for c in field.choices.all()]
@@ -339,6 +359,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'shift_time',
             'is_completed',
             'is_deprecated',
+            'is_draft',
             'created_at',
             'updated_at',
             'signatures',
