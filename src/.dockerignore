@@ -1,0 +1,7 @@
+**/__pycache__
+**/.env
+**/.ruff_cache
+venv
+DevDockerfile
+Dockerfile
+pyproject.toml

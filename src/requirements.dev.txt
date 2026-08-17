@@ -2,5 +2,8 @@ ruff==0.11.*
 mypy==1.15.*
 django-stubs==5.2.*
 djangorestframework-stubs==3.16.*
+drf-spectacular-sidecar==2025.10.*
+djlint==1.36.4
+
 pytest-django==4.12.*
 pytest-cov==7.1.*

@@ -9,22 +9,24 @@ services:
       - "54320:5432"
     volumes:
       - checklists_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'" ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   migrations:
-    build:
-      context: ../src
-      dockerfile: Dockerfile
+    image: polipak/checklists_backend:dev
     container_name: checklists-migrations
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     env_file:
       - .env
     command: python manage.py migrate --noinput
 
   backend:
-    build:
-      context: ../src
-      dockerfile: Dockerfile
+    image: polipak/checklists_backend:dev
     container_name: checklists-backend
     restart: unless-stopped
     volumes:
