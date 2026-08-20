@@ -106,30 +106,23 @@ class ChecklistResultAdmin(admin.ModelAdmin):
     """
 
     list_display = (
-        'id',
-        'get_equipment',
-        'user_uid',
-        'shift_number',
-        'is_draft',
-        'is_completed',
-        'is_deprecated',
-        'created_at',
+        'id', 'get_equipment', 'user_uid', 'source_service', 'shift_number',
+        'is_draft', 'is_completed', 'is_deprecated', 'created_at'
     )
 
     list_filter = (
-        'is_draft',
-        'is_completed',
-        'is_deprecated',
-        'shift_number',
-        'template__checklist_type',
+        'is_draft', 'is_completed', 'is_deprecated',
+        'source_service', 'shift_number', 'template__checklist_type'
     )
-    search_fields = ('user_uid', 'template__equipment_uid')
+
+    search_fields = (
+    'user_uid', 'template__equipment_uid', 'external_id', 'source_service')
+
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('template', 'origin')
-
     inlines = [ChecklistSignatureInline, ChecklistAnswerInline]
 
-    @admin.display(description='Оборудование', ordering='template__equipment_uid')
+    @admin.display(description='Оборудование',
+                   ordering='template__equipment_uid')
     def get_equipment(self, obj):
-        """Прокси-метод для отображения UID оборудования из связанного шаблона."""
         return obj.template.equipment_uid

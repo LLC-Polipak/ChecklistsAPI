@@ -13,7 +13,6 @@ from apps.checklists.models import (
     TemplateField,
     TemplateFieldGroup,
 )
-from apps.checklists.repositories import DjangoTemplateRepository
 
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
@@ -171,6 +170,10 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     shift_time = serializers.DateTimeField(required=False, allow_null=True)
     is_draft = serializers.BooleanField(default=False)
     answers = serializers.DictField(child=AnswerItemSerializer(), allow_empty=True)
+    external_id = serializers.CharField(max_length=255, required=False,
+                                        allow_null=True)
+    source_service = serializers.CharField(max_length=100, required=False,
+                                           allow_null=True)
 
     def validate(self, attrs):
         """
@@ -210,8 +213,9 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         if self.instance:
             return self.instance.template
 
-        template = DjangoTemplateRepository().get_active_template(
-            attrs.get('equipment_uid'), attrs.get('checklist_type')
+        template = Template.objects.get_active(
+            attrs.get('equipment_uid'),
+            attrs.get('checklist_type')
         )
         if not template:
             raise ValidationError('Активный шаблон для данного оборудования не найден.')
@@ -350,20 +354,12 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChecklistResult
         fields = [
-            'id',
-            'equipment_uid',
-            'user_uid',
-            'checklist_type',
-            'checklist_type_display',
-            'shift_number',
+            'id', 'equipment_uid', 'user_uid', 'external_id', 'source_service',
+            'checklist_type', 'checklist_type_display', 'shift_number',
             'shift_time',
-            'is_completed',
-            'is_deprecated',
-            'is_draft',
-            'created_at',
+            'is_draft', 'is_completed', 'is_deprecated', 'created_at',
             'updated_at',
-            'signatures',
-            'answers',
+            'signatures', 'answers'
         ]
 
 

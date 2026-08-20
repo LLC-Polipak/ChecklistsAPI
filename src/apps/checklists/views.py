@@ -10,10 +10,6 @@ from rest_framework.response import Response
 from apps.checklists.export_service import ChecklistExcelExporter
 from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
 from apps.checklists.models import ChecklistResult, Template
-from apps.checklists.repositories import (
-    DjangoResultRepository,
-    DjangoTemplateRepository,
-)
 from apps.checklists.serializers import (
     ChecklistResultCreateSerializer,
     ChecklistResultListSerializer,
@@ -51,7 +47,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Сервис сам позаботится о версионировании (устаревании прошлых шаблонов) и
         атомарном сохранении всей иерархии (Группы -> Поля -> Варианты).
         """
-        service = TemplateService(DjangoTemplateRepository())
+        service = TemplateService()
         serializer.instance = service.create_template(serializer.validated_data)
 
     def perform_update(self, serializer):
@@ -61,10 +57,9 @@ class TemplateViewSet(viewsets.ModelViewSet):
         (например, запрет редактирования используемых шаблонов) и полностью
         перезаписывает структуру групп и полей.
         """
-        service = TemplateService(DjangoTemplateRepository())
-        serializer.instance = service.update_template(
-            serializer.instance, serializer.validated_data
-        )
+        service = TemplateService()
+        serializer.instance = service.update_template(serializer.instance,
+                                                      serializer.validated_data)
 
     def destroy(self, request, *args, **kwargs):
         """
@@ -76,15 +71,14 @@ class TemplateViewSet(viewsets.ModelViewSet):
             HTTP 404: Шаблон с таким параметром не найден.
         """
         instance = self.get_object()
-        service = TemplateService(DjangoTemplateRepository())
+        service = TemplateService()
 
         try:
             service.delete_template(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ValidationError as e:
-            return Response(
-                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e.detail[0])},
+                            status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
@@ -92,16 +86,10 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Возвращает историю изменений для данного шаблона.
         (Находит все устаревшие и текущую версию для этого оборудования и типа).
         """
-        current_template = self.get_object()
-
-        repo = DjangoTemplateRepository()
-        history_queryset = repo.get_template_history(
-            equipment_uid=current_template.equipment_uid,
-            checklist_type=current_template.checklist_type,
-        )
-
+        current = self.get_object()
+        history_queryset = Template.objects.get_history(current.equipment_uid,
+                                                        current.checklist_type)
         serializer = self.get_serializer(history_queryset, many=True)
-
         return Response(serializer.data)
 
     def get_queryset(self):
@@ -121,8 +109,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Возвращает список уникальных UID оборудования из активных шаблонов.
         Идеально для подсказок (autocomplete) на фронтенде.
         """
-        repo = DjangoTemplateRepository()
-        return Response(repo.get_unique_equipments())
+        return Response(Template.objects.get_unique_equipments())
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -187,7 +174,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Передает провалидированные данные в ChecklistResultService, который
         сохраняет ответы и автоматически ставит подпись составителя (AUTHOR).
         """
-        service = ChecklistResultService(DjangoResultRepository())
+        service = ChecklistResultService()
         serializer.instance = service.submit_result(serializer.validated_data)
 
     def perform_update(self, serializer):
@@ -196,10 +183,9 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Сервис отвечает за Аудиторский след (Audit Trail): вместо изменения текущей записи,
         он помечает ее как устаревшую и создает новую версию с переносом всех старых подписей.
         """
-        service = ChecklistResultService(DjangoResultRepository())
-        serializer.instance = service.update_result(
-            serializer.instance, serializer.validated_data
-        )
+        service = ChecklistResultService()
+        serializer.instance = service.update_result(serializer.instance,
+                                                    serializer.validated_data)
 
     def destroy(self, request, *args, **kwargs):
         """
@@ -210,15 +196,13 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
             HTTP 404: Анкета с таким параметром не найдена.
         """
         instance = self.get_object()
-        service = ChecklistResultService(DjangoResultRepository())
-
+        service = ChecklistResultService()
         try:
             service.delete_result(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ValidationError as e:
-            return Response(
-                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
-            )
+            return Response({"error": str(e.detail[0])},
+                            status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
@@ -226,14 +210,10 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Возвращает историю изменений конкретной анкеты.
         Включает оригинал и все его исправления, отсортированные от новых к старым.
         """
-        current_result = self.get_object()
-        origin_id = current_result.origin_id or current_result.id
-
-        repo = DjangoResultRepository()
-        history_queryset = repo.get_result_history(origin_id=origin_id)
-
+        current = self.get_object()
+        origin_id = current.origin_id if current.origin_id else current.id
+        history_queryset = ChecklistResult.objects.get_history(origin_id)
         serializer = self.get_serializer(history_queryset, many=True)
-
         return Response(serializer.data)
 
     @extend_schema(
@@ -263,20 +243,16 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         serializer = ChecklistSignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        service = ChecklistResultService(DjangoResultRepository())
-
+        service = ChecklistResultService()
         result, created = service.sign_result(
             result_id=pk,
             role=serializer.validated_data['role'],
-            user_uid=serializer.validated_data['user_uid'],
+            user_uid=serializer.validated_data['user_uid']
         )
 
-        msg = 'Анкета успешно подписана!' if created else 'Подпись успешно обновлена!'
-
-        return Response(
-            {'message': msg, 'is_completed': result.is_completed},
-            status=status.HTTP_200_OK,
-        )
+        msg = "Анкета успешно подписана!" if created else "Подпись успешно обновлена!"
+        return Response({"message": msg, "is_completed": result.is_completed},
+                        status=status.HTTP_200_OK)
 
     @extend_schema(
         summary='Экспорт анкеты в Excel',

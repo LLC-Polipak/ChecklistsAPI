@@ -1,8 +1,11 @@
 from django.db import transaction
+from django.utils.timezone import now
 from rest_framework.exceptions import ValidationError
 
 from apps.checklists.constants import SignatureRoles
-from apps.checklists.interfaces import IResultRepository, ITemplateRepository
+
+from apps.checklists.models import Template, TemplateFieldGroup, TemplateField, \
+    FieldChoice, ChecklistResult, ChecklistAnswer, ChecklistSignature
 
 
 class TemplateService:
@@ -11,9 +14,6 @@ class TemplateService:
     Отвечает за версионирование (создание новых версий поверх старых)
     и проверку целостности данных при редактировании.
     """
-
-    def __init__(self, repository: ITemplateRepository):
-        self.repository = repository
 
     @transaction.atomic
     def create_template(self, validated_data: dict):
@@ -27,11 +27,16 @@ class TemplateService:
         """
         groups_data = validated_data.pop('groups', [])
 
-        self.repository.deprecate_templates(
-            validated_data.get('equipment_uid'), validated_data.get('checklist_type')
+        Template.objects.deprecate_all(
+            validated_data.get('equipment_uid'),
+            validated_data.get('checklist_type')
         )
 
-        return self.repository.save_template_hierarchy(validated_data, groups_data)
+        template = Template.objects.create(**validated_data)
+
+        self._save_hierarchy(template, groups_data)
+
+        return template
 
     @transaction.atomic
     def update_template(self, instance, validated_data: dict):
@@ -43,8 +48,7 @@ class TemplateService:
         """
         if instance.results.exists():
             raise ValidationError(
-                'Невозможно изменить шаблон, по нему уже есть анкеты.'
-            )
+                "Невозможно изменить шаблон, по нему уже есть анкеты.")
 
         groups_data = validated_data.pop('groups', None)
 
@@ -55,7 +59,7 @@ class TemplateService:
 
         if groups_data is not None:
             instance.groups.all().delete()
-            self.repository.save_template_hierarchy({'id': instance.id}, groups_data)
+            self._save_hierarchy(instance, groups_data)
 
         return instance
 
@@ -71,14 +75,28 @@ class TemplateService:
         """
         if instance.results.exists():
             raise ValidationError(
-                'Невозможно удалить шаблон, по нему уже есть заполненные анкеты.'
-            )
+                "Невозможно удалить шаблон, по нему уже есть заполненные анкеты.")
 
-        equipment_uid = instance.equipment_uid
-        checklist_type = instance.checklist_type
+        eq_uid = instance.equipment_uid
+        c_type = instance.checklist_type
 
-        self.repository.delete_template(instance)
-        self.repository.restore_latest_deprecated_template(equipment_uid, checklist_type)
+        instance.delete()
+        Template.objects.restore_latest_deprecated(eq_uid, c_type)
+
+    def _save_hierarchy(self, template: Template, groups_data: list):
+        """Вспомогательный метод для сохранения дерева структуры шаблона."""
+        for group_data in groups_data:
+            fields_data = group_data.pop('fields', [])
+            group = TemplateFieldGroup.objects.create(template=template,
+                                                      **group_data)
+
+            for field_data in fields_data:
+                choices_data = field_data.pop('choices', [])
+                field = TemplateField.objects.create(group=group, **field_data)
+
+                if choices_data:
+                    FieldChoice.objects.bulk_create(
+                        [FieldChoice(field=field, **c) for c in choices_data])
 
 
 class ChecklistResultService:
@@ -87,9 +105,6 @@ class ChecklistResultService:
     Отвечает за Аудиторский след (Audit Trail), проверку подписей и
     отслеживание состояний (Черновик / Чистовик / Завершено).
     """
-
-    def __init__(self, repository: IResultRepository):
-        self.repository = repository
 
     @transaction.atomic
     def submit_result(self, validated_data: dict):
@@ -103,9 +118,11 @@ class ChecklistResultService:
         validated_data.pop('equipment_uid', None)
         validated_data.pop('checklist_type', None)
 
-        result = self.repository.save_result_with_answers(validated_data, answers_data)
+        result = ChecklistResult.objects.create(**validated_data)
 
-        self.repository.upsert_signature(result, SignatureRoles.AUTHOR, result.user_uid)
+        self._save_answers(result, answers_data)
+        self._upsert_signature(result, SignatureRoles.AUTHOR, result.user_uid)
+
         return result
 
     @transaction.atomic
@@ -120,7 +137,8 @@ class ChecklistResultService:
         3. Все существующие подписи переносятся на новую версию анкеты.
         """
         if instance.is_completed:
-            raise ValidationError('Невозможно изменить анкету: она уже утверждена.')
+            raise ValidationError(
+                "Невозможно изменить анкету: она уже утверждена.")
 
         answers_data = validated_data.pop('validated_answers')
 
@@ -128,13 +146,17 @@ class ChecklistResultService:
         validated_data.pop('equipment_uid', None)
         validated_data.pop('checklist_type', None)
 
-        self.repository.deprecate_result(instance)
+        ChecklistResult.objects.deprecate(instance)
 
-        validated_data['origin'] = instance.origin or instance
-        new_result = self.repository.save_result_with_answers(validated_data, answers_data)
+        validated_data[
+            'origin'] = instance.origin if instance.origin else instance
+
+        new_result = ChecklistResult.objects.create(**validated_data)
+
+        self._save_answers(new_result, answers_data)
 
         for old_sig in instance.signatures.all():
-            self.repository.upsert_signature(new_result, old_sig.role, old_sig.user_uid)
+            self._upsert_signature(new_result, old_sig.role, old_sig.user_uid)
 
         return new_result
 
@@ -148,20 +170,18 @@ class ChecklistResultService:
         3. Если анкета уже закрыта, новую подпись может поставить только Читатель (READER).
         4. Если подпись ставит Утверждающий (APPROVER), анкета переходит в статус Завершено (is_completed=True).
         """
-        result = self.repository.get_result_by_id(result_id)
+        result = ChecklistResult.objects.get(id=result_id)
 
         if result.is_draft:
             raise ValidationError(
-                'Нельзя подписать черновик. Сначала сохраните анкету как чистовик.'
-            )
-
+                "Нельзя подписать черновик. Сначала сохраните анкету как чистовик.")
         if result.is_deprecated:
-            raise ValidationError('Нельзя подписать устаревшую анкету.')
-
+            raise ValidationError("Нельзя подписать устаревшую анкету.")
         if result.is_completed and role != SignatureRoles.READER:
-            raise ValidationError('Анкета закрыта. Разрешены только подписи Читателя.')
+            raise ValidationError(
+                "Анкета закрыта. Разрешены только подписи Читателя.")
 
-        _signature, created = self.repository.upsert_signature(result, role, user_uid)
+        signature, created = self._upsert_signature(result, role, user_uid)
         result.check_and_complete()
 
         return result, created
@@ -173,7 +193,27 @@ class ChecklistResultService:
         При удалении активной версии (ошибочное исправление),
         система "воскрешает" предыдущую устаревшую версию.
         """
-        origin_id = instance.origin_id or instance.id
+        origin_id = instance.origin_id if instance.origin_id else instance.id
+        instance.delete()
+        ChecklistResult.objects.restore_latest_deprecated(origin_id)
 
-        self.repository.delete_result(instance)
-        self.repository.restore_latest_deprecated_result(origin_id)
+    def _save_answers(self, result: ChecklistResult, answers_data: list):
+        """Вспомогательный метод для сохранения ответов анкеты."""
+        answers = [
+            ChecklistAnswer(result=result, field=item['field'],
+                            value=item['value'], comment=item['comment'])
+            for item in answers_data
+        ]
+        ChecklistAnswer.objects.bulk_create(answers)
+
+    def _upsert_signature(self, result: ChecklistResult, role: str,
+                          user_uid: str):
+        """Вспомогательный метод для подписи"""
+        signature, created = ChecklistSignature.objects.get_or_create(
+            result=result, role=role, defaults={'user_uid': user_uid}
+        )
+        if not created:
+            signature.user_uid = user_uid
+            signature.signed_at = now()
+            signature.save(update_fields=['user_uid', 'signed_at'])
+        return signature, created

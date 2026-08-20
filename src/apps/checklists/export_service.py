@@ -9,13 +9,6 @@ from apps.checklists.models import ChecklistResult
 class ChecklistExcelExporter:
     """Сервис для экспорта заполненной анкеты в Excel."""
 
-    @staticmethod
-    def _format_empty(value):
-        """Вспомогательная функция: заменяет пустые значения и None на прочерк."""
-        if value is None or str(value).strip() == '':
-            return '-'
-        return str(value)
-
     @classmethod
     def export(cls, result: ChecklistResult) -> bytes:
         """Создает Excel-файл из заполненной анкеты чек-листа."""
@@ -104,3 +97,10 @@ class ChecklistExcelExporter:
         wb.save(stream)
         stream.seek(0)
         return stream.getvalue()
+
+    @staticmethod
+    def _format_empty(value):
+        """Вспомогательная функция: заменяет пустые значения и None на прочерк."""
+        if value is None or str(value).strip() == '':
+            return '-'
+        return str(value)

@@ -6,6 +6,8 @@ from apps.checklists.constants import (
     ShiftTypes,
     SignatureRoles,
 )
+from apps.checklists.managers import TemplateManager, ChecklistResultManager
+from apps.checklists.querysets import TemplateQuerySet, ChecklistResultQuerySet
 
 
 class Template(models.Model):
@@ -23,6 +25,8 @@ class Template(models.Model):
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
     is_deprecated = models.BooleanField('Устаревший', default=False)
+
+    objects = TemplateManager.from_queryset(TemplateQuerySet)()
 
     class Meta:
         verbose_name = 'Шаблон чек-листа'
@@ -147,6 +151,14 @@ class ChecklistResult(models.Model):
 
     created_at = models.DateTimeField('Дата заполнения', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
+
+    external_id = models.CharField('Внешний ID', max_length=255,
+                                   null=True,
+                                   db_index=True)
+    source_service = models.CharField('Система источник', max_length=100,
+                                      null=True)
+
+    objects = ChecklistResultManager.from_queryset(ChecklistResultQuerySet)()
 
     class Meta:
         verbose_name = 'Результат чек-листа'
