@@ -3,9 +3,15 @@ from django.utils.timezone import now
 from rest_framework.exceptions import ValidationError
 
 from apps.checklists.constants import SignatureRoles
-
-from apps.checklists.models import Template, TemplateFieldGroup, TemplateField, \
-    FieldChoice, ChecklistResult, ChecklistAnswer, ChecklistSignature
+from apps.checklists.models import (
+    ChecklistAnswer,
+    ChecklistResult,
+    ChecklistSignature,
+    FieldChoice,
+    Template,
+    TemplateField,
+    TemplateFieldGroup,
+)
 
 
 class TemplateService:
@@ -28,8 +34,7 @@ class TemplateService:
         groups_data = validated_data.pop('groups', [])
 
         Template.objects.deprecate_all(
-            validated_data.get('equipment_uid'),
-            validated_data.get('checklist_type')
+            validated_data.get('equipment_uid'), validated_data.get('checklist_type')
         )
 
         template = Template.objects.create(**validated_data)
@@ -48,7 +53,8 @@ class TemplateService:
         """
         if instance.results.exists():
             raise ValidationError(
-                "Невозможно изменить шаблон, по нему уже есть анкеты.")
+                'Невозможно изменить шаблон, по нему уже есть анкеты.'
+            )
 
         groups_data = validated_data.pop('groups', None)
 
@@ -75,7 +81,8 @@ class TemplateService:
         """
         if instance.results.exists():
             raise ValidationError(
-                "Невозможно удалить шаблон, по нему уже есть заполненные анкеты.")
+                'Невозможно удалить шаблон, по нему уже есть заполненные анкеты.'
+            )
 
         eq_uid = instance.equipment_uid
         c_type = instance.checklist_type
@@ -87,8 +94,7 @@ class TemplateService:
         """Вспомогательный метод для сохранения дерева структуры шаблона."""
         for group_data in groups_data:
             fields_data = group_data.pop('fields', [])
-            group = TemplateFieldGroup.objects.create(template=template,
-                                                      **group_data)
+            group = TemplateFieldGroup.objects.create(template=template, **group_data)
 
             for field_data in fields_data:
                 choices_data = field_data.pop('choices', [])
@@ -96,7 +102,8 @@ class TemplateService:
 
                 if choices_data:
                     FieldChoice.objects.bulk_create(
-                        [FieldChoice(field=field, **c) for c in choices_data])
+                        [FieldChoice(field=field, **c) for c in choices_data]
+                    )
 
 
 class ChecklistResultService:
@@ -137,8 +144,7 @@ class ChecklistResultService:
         3. Все существующие подписи переносятся на новую версию анкеты.
         """
         if instance.is_completed:
-            raise ValidationError(
-                "Невозможно изменить анкету: она уже утверждена.")
+            raise ValidationError('Невозможно изменить анкету: она уже утверждена.')
 
         answers_data = validated_data.pop('validated_answers')
 
@@ -148,8 +154,7 @@ class ChecklistResultService:
 
         ChecklistResult.objects.deprecate(instance)
 
-        validated_data[
-            'origin'] = instance.origin if instance.origin else instance
+        validated_data['origin'] = instance.origin or instance
 
         new_result = ChecklistResult.objects.create(**validated_data)
 
@@ -174,12 +179,12 @@ class ChecklistResultService:
 
         if result.is_draft:
             raise ValidationError(
-                "Нельзя подписать черновик. Сначала сохраните анкету как чистовик.")
+                'Нельзя подписать черновик. Сначала сохраните анкету как чистовик.'
+            )
         if result.is_deprecated:
-            raise ValidationError("Нельзя подписать устаревшую анкету.")
+            raise ValidationError('Нельзя подписать устаревшую анкету.')
         if result.is_completed and role != SignatureRoles.READER:
-            raise ValidationError(
-                "Анкета закрыта. Разрешены только подписи Читателя.")
+            raise ValidationError('Анкета закрыта. Разрешены только подписи Читателя.')
 
         signature, created = self._upsert_signature(result, role, user_uid)
         result.check_and_complete()
@@ -193,21 +198,24 @@ class ChecklistResultService:
         При удалении активной версии (ошибочное исправление),
         система "воскрешает" предыдущую устаревшую версию.
         """
-        origin_id = instance.origin_id if instance.origin_id else instance.id
+        origin_id = instance.origin_id or instance.id
         instance.delete()
         ChecklistResult.objects.restore_latest_deprecated(origin_id)
 
     def _save_answers(self, result: ChecklistResult, answers_data: list):
         """Вспомогательный метод для сохранения ответов анкеты."""
         answers = [
-            ChecklistAnswer(result=result, field=item['field'],
-                            value=item['value'], comment=item['comment'])
+            ChecklistAnswer(
+                result=result,
+                field=item['field'],
+                value=item['value'],
+                comment=item['comment'],
+            )
             for item in answers_data
         ]
         ChecklistAnswer.objects.bulk_create(answers)
 
-    def _upsert_signature(self, result: ChecklistResult, role: str,
-                          user_uid: str):
+    def _upsert_signature(self, result: ChecklistResult, role: str, user_uid: str):
         """Вспомогательный метод для подписи"""
         signature, created = ChecklistSignature.objects.get_or_create(
             result=result, role=role, defaults={'user_uid': user_uid}

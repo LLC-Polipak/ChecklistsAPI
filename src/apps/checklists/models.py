@@ -6,8 +6,8 @@ from apps.checklists.constants import (
     ShiftTypes,
     SignatureRoles,
 )
-from apps.checklists.managers import TemplateManager, ChecklistResultManager
-from apps.checklists.querysets import TemplateQuerySet, ChecklistResultQuerySet
+from apps.checklists.managers import ChecklistResultManager, TemplateManager
+from apps.checklists.querysets import ChecklistResultQuerySet, TemplateQuerySet
 
 
 class Template(models.Model):
@@ -78,6 +78,8 @@ class TemplateField(models.Model):
     field_type = models.CharField('Тип поля', max_length=20, choices=FieldTypes)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
     is_required = models.BooleanField('Обязательное поле', default=True)
+
+    metadata = models.JSONField('Метаданные (Фронтенд)', default=dict, blank=True)
 
     class Meta:
         ordering = ['order', 'id']
@@ -151,12 +153,12 @@ class ChecklistResult(models.Model):
 
     created_at = models.DateTimeField('Дата заполнения', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
+    general_comment = models.TextField('Общий комментарий', null=True)
 
-    external_id = models.CharField('Внешний ID', max_length=255,
-                                   null=True,
-                                   db_index=True)
-    source_service = models.CharField('Система источник', max_length=100,
-                                      null=True)
+    external_id = models.CharField(
+        'Внешний ID', max_length=255, null=True, db_index=True
+    )
+    source_service = models.CharField('Система источник', max_length=100, null=True)
 
     objects = ChecklistResultManager.from_queryset(ChecklistResultQuerySet)()
 

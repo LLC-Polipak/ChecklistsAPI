@@ -37,6 +37,7 @@ class TemplateAdmin(admin.ModelAdmin):
     search_fields = ('equipment_uid',)
     inlines = [TemplateFieldGroupInline]
     readonly_fields = ('created_at', 'updated_at')
+    ordering = ['is_deprecated', '-created_at']
 
 
 class TemplateFieldInline(admin.TabularInline):
@@ -45,16 +46,25 @@ class TemplateFieldInline(admin.TabularInline):
     model = TemplateField
     extra = 0
     show_change_link = True
+    fields = ('name', 'field_type', 'is_required', 'order', 'metadata')
 
 
 @admin.register(TemplateFieldGroup)
 class TemplateFieldGroupAdmin(admin.ModelAdmin):
     """Интерфейс управления Группами полей (Промежуточный слой иерархии)."""
 
-    list_display = ('id', 'name', 'template', 'order')
-    list_filter = ('template__checklist_type',)
+    list_display = ('id', 'name', 'get_template_info', 'order')
+    list_filter = ('template__checklist_type', 'template__equipment_uid')
     search_fields = ('name', 'template__equipment_uid')
     inlines = [TemplateFieldInline]
+
+    list_select_related = ('template',)
+
+    @admin.display(
+        description='Шаблон (Оборудование / Тип)', ordering='template__equipment_uid'
+    )
+    def get_template_info(self, obj):
+        return f'{obj.template.equipment_uid} ({obj.template.get_checklist_type_display()})'
 
 
 class FieldChoiceInline(admin.TabularInline):
@@ -68,10 +78,28 @@ class FieldChoiceInline(admin.TabularInline):
 class TemplateFieldAdmin(admin.ModelAdmin):
     """Интерфейс управления конкретными Полями анкеты."""
 
-    list_display = ('id', 'name', 'group', 'field_type', 'is_required', 'order')
+    list_display = (
+        'id',
+        'name',
+        'get_group_name',
+        'get_template_info',
+        'field_type',
+        'is_required',
+        'order',
+    )
     list_filter = ('field_type', 'is_required', 'group__template__checklist_type')
     search_fields = ('name', 'group__template__equipment_uid')
     inlines = [FieldChoiceInline]
+
+    list_select_related = ('group', 'group__template')
+
+    @admin.display(description='Группа', ordering='group__name')
+    def get_group_name(self, obj):
+        return obj.group.name
+
+    @admin.display(description='Шаблон', ordering='group__template__equipment_uid')
+    def get_template_info(self, obj):
+        return f'{obj.group.template.equipment_uid} ({obj.group.template.get_checklist_type_display()})'
 
 
 class ChecklistSignatureInline(admin.TabularInline):
@@ -106,23 +134,38 @@ class ChecklistResultAdmin(admin.ModelAdmin):
     """
 
     list_display = (
-        'id', 'get_equipment', 'user_uid', 'source_service', 'shift_number',
-        'is_draft', 'is_completed', 'is_deprecated', 'created_at'
+        'id',
+        'get_equipment',
+        'user_uid',
+        'source_service',
+        'shift_number',
+        'is_draft',
+        'is_completed',
+        'is_deprecated',
+        'created_at',
     )
-
     list_filter = (
-        'is_draft', 'is_completed', 'is_deprecated',
-        'source_service', 'shift_number', 'template__checklist_type'
+        'is_draft',
+        'is_completed',
+        'is_deprecated',
+        'source_service',
+        'shift_number',
+        'template__checklist_type',
     )
-
     search_fields = (
-    'user_uid', 'template__equipment_uid', 'external_id', 'source_service')
-
+        'user_uid',
+        'template__equipment_uid',
+        'external_id',
+        'source_service',
+    )
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('template', 'origin')
     inlines = [ChecklistSignatureInline, ChecklistAnswerInline]
 
-    @admin.display(description='Оборудование',
-                   ordering='template__equipment_uid')
+    list_select_related = ('template',)
+
+    ordering = ['is_deprecated', '-created_at']
+
+    @admin.display(description='Оборудование', ordering='template__equipment_uid')
     def get_equipment(self, obj):
         return obj.template.equipment_uid

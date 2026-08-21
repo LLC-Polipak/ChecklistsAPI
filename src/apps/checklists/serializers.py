@@ -17,7 +17,7 @@ from apps.checklists.models import (
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
     """
-    DTO для вариантов ответов.
+    Сериализатор для вариантов ответов.
     Используется исключительно для полей типа 'CHOICE' (выпадающий список).
     """
 
@@ -28,7 +28,7 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
 
 class TemplateFieldSerializer(serializers.ModelSerializer):
     """
-    DTO для поля шаблона анкеты.
+    Сериализатор для поля шаблона анкеты.
     Описывает конкретный вопрос, его тип и возможные варианты ответа (если применимо).
     """
 
@@ -46,6 +46,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             'field_type_display',
             'is_required',
             'order',
+            'metadata',
             'choices',
         ]
         read_only_fields = ['id']
@@ -60,9 +61,11 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
 
         if field_type == FieldTypes.CHOICE:
             if not choices:
-                raise serializers.ValidationError({
-                    'choices': 'Для типа "Выбор из списка" необходимо передать хотя бы один вариант ответа.'
-                })
+                raise serializers.ValidationError(
+                    {
+                        'choices': 'Для типа "Выбор из списка" необходимо передать хотя бы один вариант ответа.'
+                    }
+                )
         elif choices:
             attrs['choices'] = []
 
@@ -70,14 +73,14 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
 
 
 class AnswerItemSerializer(serializers.Serializer):
-    """Вспомогательный DTO для ответов с комментарием."""
+    """Вспомогательный сериализатор для ответов с комментарием."""
 
     value = serializers.CharField(allow_blank=True)
     comment = serializers.CharField(allow_blank=True, required=False, default='')
 
 
 class TemplateFieldGroupSerializer(serializers.ModelSerializer):
-    """Вспомогательный DTO для представления группы полей шаблона."""
+    """Вспомогательный сериализатор для представления группы полей шаблона."""
 
     fields = TemplateFieldSerializer(many=True)
 
@@ -154,15 +157,20 @@ class TemplateSerializer(serializers.ModelSerializer):
 class ChecklistResultCreateSerializer(serializers.Serializer):
     """
     Сериализатор для принятия и динамической валидации заполненной анкеты.
-    Проверяет наличие ответов на все поля.
-    Динамически валидирует типы присланных строковых данных, приводимость к INTEGER,
-    допустимость Boolean, наличие значения в списке FieldChoice.
+
+    Особенности:
+    - Проверяет наличие ответов на все ОБЯЗАТЕЛЬНЫЕ поля (если анкета не является черновиком).
+    - Выполняет Type Casting (приведение типов) "на лету", гарантируя, что
+      строковые ответы пользователя соответствуют требованиям БД (INTEGER, DATE, BOOLEAN).
+    - Передает провалидированные данные слою Сервисов для последующего сохранения.
     """
 
     equipment_uid = serializers.CharField(
         max_length=255, write_only=True, required=False
     )
-    checklist_type = serializers.CharField(max_length=50, write_only=True)
+    checklist_type = serializers.CharField(
+        max_length=50, write_only=True, required=False
+    )
 
     user_uid = serializers.CharField(max_length=36)
 
@@ -170,24 +178,25 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     shift_time = serializers.DateTimeField(required=False, allow_null=True)
     is_draft = serializers.BooleanField(default=False)
     answers = serializers.DictField(child=AnswerItemSerializer(), allow_empty=True)
-    external_id = serializers.CharField(max_length=255, required=False,
-                                        allow_null=True)
-    source_service = serializers.CharField(max_length=100, required=False,
-                                           allow_null=True)
+    general_comment = serializers.CharField(
+        allow_blank=True, required=False, default=''
+    )
+    external_id = serializers.CharField(max_length=255, required=False, allow_null=True)
+    source_service = serializers.CharField(
+        max_length=100, required=False, allow_null=True
+    )
 
     def validate(self, attrs):
         """
-        Ядро динамической валидации EAV-структуры.
+        Главный оркестратор динамической валидации EAV-структуры.
 
-        Алгоритм работы:
-        1. Извлекает эталонный шаблон из БД (с prefetch_related для минимизации запросов).
-        2. Сверяет ключи присланных ответов с ID полей шаблона, гарантируя,
-           что нет пропущенных обязательных полей.
-        3. Выполняет Type Casting (приведение типов) на лету: проверяет, является ли
-           строка корректным числом (INTEGER), булевым значением (CHECKBOX) или
-           существующим вариантом (CHOICE).
+        Шаги:
+        1. Получает эталонный шаблон (из БД при создании, либо из инстанса при обновлении).
+        2. Проверяет отсутствие пропущенных обязательных полей (только для чистовиков).
+        3. Запускает проверку типов данных для каждого присланного ответа.
 
-        Возвращает подготовленный и безопасный список данных для метода create().
+        Returns:
+            Словарь с подготовленными данными (добавляет ключи 'template' и 'validated_answers').
         """
         answers_data = attrs.get('answers', {})
         is_draft = attrs.get('is_draft', False)
@@ -209,20 +218,30 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         return attrs
 
     def _get_active_template(self, attrs):
-        """Извлекает шаблон из БД или из инстанса при обновлении."""
+        """
+        Извлекает шаблон из БД с использованием кастомного Менеджера.
+
+        Raises:
+            ValidationError: Если активного шаблона для данного оборудования не существует.
+        """
         if self.instance:
             return self.instance.template
 
         template = Template.objects.get_active(
-            attrs.get('equipment_uid'),
-            attrs.get('checklist_type')
+            attrs.get('equipment_uid'), attrs.get('checklist_type')
         )
         if not template:
             raise ValidationError('Активный шаблон для данного оборудования не найден.')
         return template
 
     def _process_and_validate_answers(self, template_fields, answers_data, is_draft):
-        """Прогоняет каждый ответ через валидатор типов данных."""
+        """
+        Прогоняет каждый ответ пользователя через индивидуальный валидатор типов.
+        Игнорирует пустые ответы для необязательных полей или черновиков.
+
+        Returns:
+            Список подготовленных словарей [{'field': объект_поля, 'value': значение, 'comment': комментарий}].
+        """
         errors = {}
         validated_answers = []
 
@@ -236,11 +255,13 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
             comment = str(answer_obj.get('comment', '')).strip()
 
             if not field.is_required and value == '':
-                validated_answers.append({
-                    'field': field,
-                    'value': value,
-                    'comment': comment,
-                })
+                validated_answers.append(
+                    {
+                        'field': field,
+                        'value': value,
+                        'comment': comment,
+                    }
+                )
                 continue
 
             if field.is_required and value == '' and not is_draft:
@@ -248,22 +269,26 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 continue
 
             if value == '':
-                validated_answers.append({
-                    'field': field,
-                    'value': value,
-                    'comment': comment,
-                })
+                validated_answers.append(
+                    {
+                        'field': field,
+                        'value': value,
+                        'comment': comment,
+                    }
+                )
                 continue
 
             error_msg = self._validate_single_field(field, value)
             if error_msg:
                 errors[f_id] = error_msg
             else:
-                validated_answers.append({
-                    'field': field,
-                    'value': value,
-                    'comment': comment,
-                })
+                validated_answers.append(
+                    {
+                        'field': field,
+                        'value': value,
+                        'comment': comment,
+                    }
+                )
 
         if errors:
             raise ValidationError(errors)
@@ -272,7 +297,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
     @staticmethod
     def _check_missing_required_fields(template_fields, answers_data, is_draft):
-        """Проверяет, все ли обязательные поля присутствуют (если это не черновик)."""
+        """Проверяет, все ли обязательные поля присутствуют (отключается, если is_draft=True)."""
         if is_draft:
             return
 
@@ -286,8 +311,11 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     @staticmethod
     def _validate_single_field(field, value):
         """
-        Вспомогательный метод для валидации: проверяет одно поле.
-        Возвращает текст ошибки или None.
+        Низкоуровневая проверка значения для конкретного поля шаблона.
+        Убеждается, что строку можно безопасно конвертировать в целевой тип БД.
+
+        Returns:
+            Строка с текстом ошибки, либо None, если проверка пройдена.
         """
         if field.field_type == FieldTypes.INTEGER and not value.lstrip('-').isdigit():
             return f"Поле '{field.name}' должно быть целым числом."
@@ -307,15 +335,15 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         return None
 
     def to_representation(self, instance):
-        """Выдачи ответа после успешного POST/PUT запроса."""
+        """
+        Определяет формат ответа после успешного POST/PUT запроса.
+        Делегирует сериализацию объекту ChecklistResultListSerializer для выдачи полной иерархии.
+        """
         return ChecklistResultListSerializer(instance, context=self.context).data
 
 
 class ChecklistAnswerSerializer(serializers.ModelSerializer):
-    """
-    DTO для вывода конкретного ответа пользователя.
-    Подтягивает названия и типы полей из связанной таблицы для удобства фронтенда.
-    """
+    """Сериализатор для вывода конкретного ответа пользователя (содержит значение и комментарий)."""
 
     field_name = serializers.CharField(source='field.name')
     field_type = serializers.CharField(source='field.field_type')
@@ -337,7 +365,10 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
 
 
 class ChecklistResultListSerializer(serializers.ModelSerializer):
-    """DTO для вывода истории заполненных чек-листов (включая вложенные ответы)."""
+    """
+    Сериализатор для вывода истории заполненных чек-листов.
+    Инкапсулирует в себе ответы пользователя (answers) и подписи (signatures).
+    """
 
     checklist_type = serializers.CharField(
         source='template.checklist_type', read_only=True
@@ -354,17 +385,28 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChecklistResult
         fields = [
-            'id', 'equipment_uid', 'user_uid', 'external_id', 'source_service',
-            'checklist_type', 'checklist_type_display', 'shift_number',
+            'id',
+            'equipment_uid',
+            'user_uid',
+            'external_id',
+            'source_service',
+            'checklist_type',
+            'checklist_type_display',
+            'shift_number',
             'shift_time',
-            'is_draft', 'is_completed', 'is_deprecated', 'created_at',
+            'is_draft',
+            'is_completed',
+            'is_deprecated',
+            'general_comment',
+            'created_at',
             'updated_at',
-            'signatures', 'answers'
+            'signatures',
+            'answers',
         ]
 
 
 class ChecklistSignatureSerializer(serializers.ModelSerializer):
-    """DTO для представления подписей анкет чек-листа."""
+    """Сериализатор для представления электронных подписей анкеты."""
 
     role_display = serializers.CharField(source='get_role_display', read_only=True)
 
@@ -374,7 +416,10 @@ class ChecklistSignatureSerializer(serializers.ModelSerializer):
 
 
 class ChecklistSignSerializer(serializers.Serializer):
-    """DTO для валидации запроса на подписание анкеты."""
+    """
+    Сериализатор для валидации запроса на подписание анкеты.
+    Позволяет Swagger'у правильно отрисовать форму для эндпоинта /sign/.
+    """
 
     role = serializers.ChoiceField(
         choices=SignatureRoles,

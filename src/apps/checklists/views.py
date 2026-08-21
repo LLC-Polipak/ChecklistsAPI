@@ -21,8 +21,11 @@ from apps.checklists.services import ChecklistResultService, TemplateService
 
 class TemplateViewSet(viewsets.ModelViewSet):
     """
-    Управление шаблонами чек-листов (CRUD).
-    Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
+    API-контроллер для управления Шаблонами чек-листов (CRUD).
+
+    Отвечает за маршрутизацию REST-запросов. Вся сложная бизнес-логика
+    (сохранение иерархии Группы -> Поля, версионирование и удаление)
+    делегирована слою сервисов (TemplateService).
     """
 
     queryset = Template.objects.prefetch_related('groups__fields__choices')
@@ -40,35 +43,42 @@ class TemplateViewSet(viewsets.ModelViewSet):
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
+    def get_queryset(self):
+        """
+        Динамическая фильтрация QuerySet в зависимости от типа запроса.
+        - При получении списка (action == 'list') скрывает устаревшие шаблоны.
+        - При прямом обращении по ID (detail, history, update) предоставляет доступ ко всей базе.
+        """
+        qs = super().get_queryset()
+        if self.action == 'list':
+            return qs.filter(is_deprecated=False)
+
+        return qs
+
     def perform_create(self, serializer):
         """
-        Переопределение стандартного процесса сохранения DRF.
-        Вместо вызова serializer.save(), мы делегируем бизнес-логику в слой Сервисов (TemplateService).
-        Сервис сам позаботится о версионировании (устаревании прошлых шаблонов) и
-        атомарном сохранении всей иерархии (Группы -> Поля -> Варианты).
+        Перехватывает создание шаблона для интеграции с Сервисом.
+        Сервис атомарно сохранит иерархию и отправит старые шаблоны в архив.
         """
         service = TemplateService()
         serializer.instance = service.create_template(serializer.validated_data)
 
     def perform_update(self, serializer):
         """
-        Переопределение стандартного процесса обновления DRF.
-        Делегирует обновление в Сервис, который проверяет бизнес-правила
-        (например, запрет редактирования используемых шаблонов) и полностью
-        перезаписывает структуру групп и полей.
+        Перехватывает обновление шаблона.
+        Сервис проверит возможность редактирования (отсутствие привязанных анкет)
+        и выполнит полную перезапись полей и групп.
         """
         service = TemplateService()
-        serializer.instance = service.update_template(serializer.instance,
-                                                      serializer.validated_data)
+        serializer.instance = service.update_template(
+            serializer.instance, serializer.validated_data
+        )
 
     def destroy(self, request, *args, **kwargs):
         """
-        Отвечает за удаление шаблона.
-
-        Returns:
-            HTTP 204: Удаление шаблон прошло успешно.
-            HTTP 400: Если на шаблон есть заполненный анкета.
-            HTTP 404: Шаблон с таким параметром не найден.
+        Обрабатывает запрос на удаление шаблона.
+        Сервис проверит бизнес-правила и попытается "воскресить" предыдущую версию
+        шаблона (откат/rollback), если текущая удаляется.
         """
         instance = self.get_object()
         service = TemplateService()
@@ -77,50 +87,41 @@ class TemplateViewSet(viewsets.ModelViewSet):
             service.delete_template(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ValidationError as e:
-            return Response({"error": str(e.detail[0])},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+            )
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         """
-        Возвращает историю изменений для данного шаблона.
-        (Находит все устаревшие и текущую версию для этого оборудования и типа).
+        Эндпоинт: GET /api/v1/templates/{id}/history/
+        Возвращает хронологическую историю изменений (все версии) шаблона
+        для данного оборудования и типа чек-листа.
         """
         current = self.get_object()
-        history_queryset = Template.objects.get_history(current.equipment_uid,
-                                                        current.checklist_type)
+        history_queryset = Template.objects.get_history(
+            current.equipment_uid, current.checklist_type
+        )
         serializer = self.get_serializer(history_queryset, many=True)
         return Response(serializer.data)
-
-    def get_queryset(self):
-        """
-        При запросе всего списка шаблонов возвращает только актуальные.
-        По-прямому ID возвращает всю историю для данного шаблона.
-        """
-        qs = super().get_queryset()
-        if self.action == 'list':
-            return qs.filter(is_deprecated=False)
-
-        return qs
 
     @action(detail=False, methods=['get'])
     def equipments(self, request):
         """
-        Возвращает список уникальных UID оборудования из активных шаблонов.
-        Идеально для подсказок (autocomplete) на фронтенде.
+        Эндпоинт: GET /api/v1/templates/equipments/
+        Возвращает плоский массив уникальных UID оборудования.
+        Используется фронтендом для реализации автодополнения (Autocomplete/Datalist).
         """
         return Response(Template.objects.get_unique_equipments())
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
     """
-    Управление результатами заполнения чек-листов (История и Сохранение).
+    API-контроллер для управления Заполненными анкетами (Результатами).
 
-    - POST/PUT/PATCH: принимает плоский словарь ответов
-    и выполняет динамическую валидацию типов данных.
-    - GET: возвращает историю заполненных анкет.
-    - GET /history/ : возвращает полную историю всех изменений анкеты.
-    - POST /sign/ : подписывает анкету пользователем с определенной ролью.
+    Поддерживает динамическую EAV-структуру (Entity-Attribute-Value).
+    Обеспечивает создание черновиков, систему электронных подписей и
+    аудиторский след (Audit Trail) при редактировании анкет.
     """
 
     queryset = ChecklistResult.objects.select_related('template').prefetch_related(
@@ -144,11 +145,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """
-        При запросе полного списка анкет возвращает только актуальные,
-        отсекая устаревшие версии.
-        По запросе по-конкретному ID возвращает всю историю для данной анкеты.
-        """
+        """Скрывает исторические (устаревшие) версии анкет из общего списка выдачи."""
         qs = super().get_queryset()
 
         if self.action == 'list':
@@ -158,11 +155,9 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         """
-        Динамический выбор сериализатора в зависимости от HTTP-метода.
-
-        Returns:
-            ChecklistResultCreateSerializer: Для записи.
-            ChecklistResultListSerializer: Для чтения.
+        Разделяет потоки данных:
+        - Запись (POST/PUT): Использует строгий валидатор.
+        - Чтение (GET): Использует DTO с полной разверткой связей и названий (display_name).
         """
         if self.action in {'create', 'update', 'partial_update'}:
             return ChecklistResultCreateSerializer
@@ -170,48 +165,43 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """
-        Переопределение сохранения новой анкеты.
-        Передает провалидированные данные в ChecklistResultService, который
-        сохраняет ответы и автоматически ставит подпись составителя (AUTHOR).
+        Делегирует сохранение ответов Сервису.
+        Сервис дополнительно проставит автоматическую подпись Составителя (AUTHOR).
         """
         service = ChecklistResultService()
         serializer.instance = service.submit_result(serializer.validated_data)
 
     def perform_update(self, serializer):
         """
-        Переопределение обновления заполненной анкеты.
-        Сервис отвечает за Аудиторский след (Audit Trail): вместо изменения текущей записи,
-        он помечает ее как устаревшую и создает новую версию с переносом всех старых подписей.
+        Делегирует обновление Сервису.
+        Вместо деструктивной перезаписи, Сервис реализует Аудиторский след (Audit Trail),
+        помещая старую анкету в архив и создавая новую версию с переносом подписей.
         """
         service = ChecklistResultService()
-        serializer.instance = service.update_result(serializer.instance,
-                                                    serializer.validated_data)
+        serializer.instance = service.update_result(
+            serializer.instance, serializer.validated_data
+        )
 
     def destroy(self, request, *args, **kwargs):
-        """
-        Отвечает за удаление анкеты чек-листа.
-
-        Returns:
-            HTTP 204: Удаление анкеты прошло успешно.
-            HTTP 404: Анкета с таким параметром не найдена.
-        """
+        """Удаляет актуальную версию анкеты и "воскрешает" предыдущую, если она существует."""
         instance = self.get_object()
         service = ChecklistResultService()
         try:
             service.delete_result(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ValidationError as e:
-            return Response({"error": str(e.detail[0])},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+            )
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         """
-        Возвращает историю изменений конкретной анкеты.
-        Включает оригинал и все его исправления, отсортированные от новых к старым.
+        Эндпоинт: GET /api/v1/results/{id}/history/
+        Возвращает всю цепочку исправлений (версий) данной анкеты от новых к старым.
         """
         current = self.get_object()
-        origin_id = current.origin_id if current.origin_id else current.id
+        origin_id = current.origin_id or current.id
         history_queryset = ChecklistResult.objects.get_history(origin_id)
         serializer = self.get_serializer(history_queryset, many=True)
         return Response(serializer.data)
@@ -237,8 +227,9 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def sign(self, request, pk=None):
         """
-        Эндпоинт для подписания анкеты.
-        Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}.
+        Эндпоинт: POST /api/v1/results/{id}/sign/
+        Обрабатывает добавление подписей. Бизнес-логика защиты от подписания черновиков
+        или устаревших анкет инкапсулирована в ChecklistResultService.
         """
         serializer = ChecklistSignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -247,12 +238,14 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         result, created = service.sign_result(
             result_id=pk,
             role=serializer.validated_data['role'],
-            user_uid=serializer.validated_data['user_uid']
+            user_uid=serializer.validated_data['user_uid'],
         )
 
-        msg = "Анкета успешно подписана!" if created else "Подпись успешно обновлена!"
-        return Response({"message": msg, "is_completed": result.is_completed},
-                        status=status.HTTP_200_OK)
+        msg = 'Анкета успешно подписана!' if created else 'Подпись успешно обновлена!'
+        return Response(
+            {'message': msg, 'is_completed': result.is_completed},
+            status=status.HTTP_200_OK,
+        )
 
     @extend_schema(
         summary='Экспорт анкеты в Excel',
@@ -262,8 +255,8 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def export_excel(self, request, pk=None):
         """
-        Эндопинт для генерации файла Excel из заполненной анкеты чек-листа.
-        Возвращает готовый Excel-файл.
+        Эндпоинт: GET /api/v1/results/{id}/export_excel/
+        Генерирует и отдает файл Excel для скачивания (без сохранения его на диск сервера).
         """
         result = self.get_object()
 

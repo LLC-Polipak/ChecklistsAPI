@@ -1,3 +1,4 @@
+import datetime
 from io import BytesIO
 
 import openpyxl
@@ -7,11 +8,32 @@ from apps.checklists.models import ChecklistResult
 
 
 class ChecklistExcelExporter:
-    """Сервис для экспорта заполненной анкеты в Excel."""
+    """
+    Сервис для генерации печатных форм анкет в формате Microsoft Excel (.xlsx).
+
+    Следует принципу единой ответственности (SRP): инкапсулирует логику работы
+    с библиотекой openpyxl, стилизацию ячеек и компоновку данных. Не взаимодействует
+    с HTTP-запросами (этим занимаются Контроллеры).
+    """
 
     @classmethod
     def export(cls, result: ChecklistResult) -> bytes:
-        """Создает Excel-файл из заполненной анкеты чек-листа."""
+        """
+        Формирует Excel-документ на основе заполненной анкеты чек-листа.
+
+        Алгоритм работы:
+        1. Формирует "шапку" с метаданными (Оборудование, Смена, Пользователь, Статус).
+        2. Отрисовывает таблицу ответов, группируя их согласно иерархии шаблона.
+        3. Заменяет пустые значения и комментарии на визуальные прочерки ('-').
+        4. Выводит блок истории подписаний (роль, UID, время).
+
+        Args:
+            result (ChecklistResult): Объект заполненной анкеты из базы данных.
+
+        Returns:
+            bytes: Готовый файл в виде бинарной последовательности (сохраненный в оперативной памяти),
+                   готовый к отправке клиенту через HttpResponse.
+        """
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = f'Анкета {result.id}'
@@ -19,29 +41,50 @@ class ChecklistExcelExporter:
         header_font = Font(bold=True, color='FFFFFF')
         header_fill = PatternFill('solid', fgColor='4F46E5')
         bold_font = Font(bold=True)
+        warning_font = Font(bold=True, color='FF0000')
 
-        ws.append(['Анкета №', str(result.id)])
-        ws.append(['Оборудование', cls._format_empty(result.template.equipment_uid)])
-        ws.append([
-            'Тип чек-листа',
-            cls._format_empty(result.template.get_checklist_type_display()),
-        ])
-        ws.append(['Пользователь', cls._format_empty(result.user_uid)])
+        ws.append(['Анкета №', result.id])
+        ws.append(['Оборудование', result.template.equipment_uid])
+        ws.append(
+            [
+                'Тип чек-листа',
+                cls._format_empty(result.template.get_checklist_type_display()),
+            ]
+        )
+        ws.append(['Пользователь', result.user_uid])
 
         shift_num = cls._format_empty(result.get_shift_number_display())
         shift_t = cls._format_empty(result.shift_time)
         ws.append(['Смена', f'{shift_num} / {shift_t}'])
 
-        ws.append(['Статус', 'ЗАВЕРШЕНА' if result.is_completed else 'В ПРОЦЕССЕ'])
+        ws.append(['Общий комментарий', cls._format_empty(result.general_comment)])
 
-        if result.is_draft:
-            ws.append(['Тип документа', 'ЧЕРНОВИК'])
+        status_text = (
+            'ЗАВЕРШЕНА'
+            if result.is_completed
+            else ('ЧЕРНОВИК' if result.is_draft else 'В ПРОЦЕССЕ')
+        )
+        ws.append(['Состояние анкеты', status_text])
 
-        ws.append(['Дата создания', result.created_at.strftime('%d.%m.%Y %H:%M')])
+        version_status = (
+            'УСТАРЕЛА (Есть более новая версия)'
+            if result.is_deprecated
+            else 'Актуальная'
+        )
+        ws.append(['Статус версии', version_status])
+
+        ws.append(['Дата заполнения', result.created_at.strftime('%d.%m.%Y %H:%M')])
+
+        export_time = datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')
+        ws.append(['Сформировано', export_time])
+
         ws.append([])
 
-        for row in range(1, ws.max_row + 1):
+        for row in range(1, 11):
             ws.cell(row=row, column=1).font = bold_font
+
+        if result.is_deprecated:
+            ws.cell(row=8, column=2).font = warning_font
 
         headers = ['Группа', 'Вопрос', 'Ответ', 'Комментарий']
         ws.append(headers)
@@ -82,11 +125,13 @@ class ChecklistExcelExporter:
             ws.append(['-', '-', '-'])
         else:
             for sig in signatures:
-                ws.append([
-                    cls._format_empty(sig.get_role_display()),
-                    cls._format_empty(sig.user_uid),
-                    sig.signed_at.strftime('%d.%m.%Y %H:%M'),
-                ])
+                ws.append(
+                    [
+                        cls._format_empty(sig.get_role_display()),
+                        cls._format_empty(sig.user_uid),
+                        sig.signed_at.strftime('%d.%m.%Y %H:%M'),
+                    ]
+                )
 
         ws.column_dimensions['A'].width = 25
         ws.column_dimensions['B'].width = 40
