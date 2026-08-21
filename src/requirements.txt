@@ -17,5 +17,5 @@ djangorestframework==3.16.*
 drf-spectacular==0.29.*
 
 # --- Production ---
-django-cors-headers=4.9.*
+django-cors-headers==4.9.*
 gunicorn==23.0.*
