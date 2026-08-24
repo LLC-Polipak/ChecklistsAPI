@@ -23,6 +23,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'drf_spectacular_sidecar',
     'corsheaders',
+    'apps.core',
     'apps.checklists',
     'apps.users',
 ]

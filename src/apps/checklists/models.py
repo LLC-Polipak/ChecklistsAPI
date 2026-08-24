@@ -228,3 +228,23 @@ class ChecklistSignature(models.Model):
         ]
         verbose_name = 'Подпись'
         verbose_name_plural = 'Подписи'
+
+
+class ChecklistAttachment(models.Model):
+    """
+    Модель для хранения медиафайлов (фотографии дефектов, сканы документов, PDF),
+    прикрепленных к результату чек-листа.
+    """
+    result = models.ForeignKey(ChecklistResult, on_delete=models.CASCADE,
+                               related_name='attachments')
+
+    file = models.FileField('Файл', upload_to='checklists/attachments/%Y/%m/')
+    uploaded_at = models.DateTimeField('Дата загрузки', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Вложение'
+        verbose_name_plural = 'Вложения'
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f"Вложение к анкете {self.result_id} ({self.file.name})"

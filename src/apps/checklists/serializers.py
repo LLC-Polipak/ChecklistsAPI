@@ -11,7 +11,7 @@ from apps.checklists.models import (
     FieldChoice,
     Template,
     TemplateField,
-    TemplateFieldGroup,
+    TemplateFieldGroup, ChecklistAttachment,
 )
 
 
@@ -364,6 +364,28 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
         ]
 
 
+class ChecklistAttachmentSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для ВЫДАЧИ информации о прикрепленном файле.
+    Django REST Framework автоматически преобразует относительный путь файла
+    в абсолютный HTTP-URL (например, http://localhost/media/...), чтобы
+    фронтенд мог сразу отобразить картинку или дать ссылку на скачивание.
+    """
+    class Meta:
+        model = ChecklistAttachment
+        fields = ['id', 'file', 'uploaded_at']
+
+
+class ChecklistAttachmentUploadSerializer(serializers.ModelSerializer):
+    """
+    Сериализатор для ВАЛИДАЦИИ входящего файла при его загрузке.
+    Используется исключительно в связке с MultiPartParser для обработки form-data.
+    """
+    class Meta:
+        model = ChecklistAttachment
+        fields = ['file']
+
+
 class ChecklistResultListSerializer(serializers.ModelSerializer):
     """
     Сериализатор для вывода истории заполненных чек-листов.
@@ -381,6 +403,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     )
 
     answers = ChecklistAnswerSerializer(many=True)
+    attachments = ChecklistAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
         model = ChecklistResult
@@ -402,6 +425,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'updated_at',
             'signatures',
             'answers',
+            'attachments'
         ]
 
 

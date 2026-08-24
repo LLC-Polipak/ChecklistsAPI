@@ -5,6 +5,7 @@ from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import filters, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
 from apps.checklists.export_service import ChecklistExcelExporter
@@ -14,9 +15,11 @@ from apps.checklists.serializers import (
     ChecklistResultCreateSerializer,
     ChecklistResultListSerializer,
     ChecklistSignSerializer,
-    TemplateSerializer,
+    TemplateSerializer, ChecklistAttachmentUploadSerializer,
+    ChecklistAttachmentSerializer,
 )
 from apps.checklists.services import ChecklistResultService, TemplateService
+from apps.core.service_locator import container
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -60,7 +63,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Перехватывает создание шаблона для интеграции с Сервисом.
         Сервис атомарно сохранит иерархию и отправит старые шаблоны в архив.
         """
-        service = TemplateService()
+        service = container.resolve(TemplateService)
         serializer.instance = service.create_template(serializer.validated_data)
 
     def perform_update(self, serializer):
@@ -69,7 +72,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         Сервис проверит возможность редактирования (отсутствие привязанных анкет)
         и выполнит полную перезапись полей и групп.
         """
-        service = TemplateService()
+        service = container.resolve(TemplateService)
         serializer.instance = service.update_template(
             serializer.instance, serializer.validated_data
         )
@@ -81,7 +84,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         шаблона (откат/rollback), если текущая удаляется.
         """
         instance = self.get_object()
-        service = TemplateService()
+        service = container.resolve(TemplateService)
 
         try:
             service.delete_template(instance)
@@ -168,7 +171,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Делегирует сохранение ответов Сервису.
         Сервис дополнительно проставит автоматическую подпись Составителя (AUTHOR).
         """
-        service = ChecklistResultService()
+        service = container.resolve(ChecklistResultService)
         serializer.instance = service.submit_result(serializer.validated_data)
 
     def perform_update(self, serializer):
@@ -177,7 +180,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         Вместо деструктивной перезаписи, Сервис реализует Аудиторский след (Audit Trail),
         помещая старую анкету в архив и создавая новую версию с переносом подписей.
         """
-        service = ChecklistResultService()
+        service = container.resolve(ChecklistResultService)
         serializer.instance = service.update_result(
             serializer.instance, serializer.validated_data
         )
@@ -185,7 +188,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Удаляет актуальную версию анкеты и "воскрешает" предыдущую, если она существует."""
         instance = self.get_object()
-        service = ChecklistResultService()
+        service = container.resolve(ChecklistResultService)
         try:
             service.delete_result(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
@@ -234,7 +237,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         serializer = ChecklistSignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        service = ChecklistResultService()
+        service = container.resolve(ChecklistResultService)
         result, created = service.sign_result(
             result_id=pk,
             role=serializer.validated_data['role'],
@@ -272,3 +275,36 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
         return response
+
+    @extend_schema(
+        summary="Прикрепить файл к анкете",
+        description="Загрузка фото/документов. Файл нужно передавать через form-data.",
+        request=ChecklistAttachmentUploadSerializer,
+        responses={201: ChecklistAttachmentSerializer}
+    )
+    @action(detail=True, methods=['post'],
+            parser_classes=[MultiPartParser, FormParser])
+    def upload_attachment(self, request, pk=None):
+        """
+        Эндпоинт для загрузки медиафайлов (фото/документы) к анкете.
+
+        Особенности:
+        - В отличие от других эндпоинтов, принимает не application/json,
+            а multipart/form-data (указано в parser_classes).
+        - Загруженный файл передается в Сервисный слой, который проверяет
+            статус анкеты (не закрыта ли она) перед сохранением.
+        """
+        serializer = ChecklistAttachmentUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        service = container.resolve(ChecklistResultService)
+        attachment = service.add_attachment(
+            result_id=pk,
+            file_obj=serializer.validated_data['file']
+        )
+
+        return Response(
+            ChecklistAttachmentSerializer(attachment,
+                                          context={'request': request}).data,
+            status=status.HTTP_201_CREATED
+        )

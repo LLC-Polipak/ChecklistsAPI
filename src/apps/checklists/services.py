@@ -10,7 +10,7 @@ from apps.checklists.models import (
     FieldChoice,
     Template,
     TemplateField,
-    TemplateFieldGroup,
+    TemplateFieldGroup, ChecklistAttachment,
 )
 
 
@@ -154,14 +154,18 @@ class ChecklistResultService:
 
         ChecklistResult.objects.deprecate(instance)
 
-        validated_data['origin'] = instance.origin or instance
-
+        validated_data['origin'] = instance.origin if instance.origin else instance
         new_result = ChecklistResult.objects.create(**validated_data)
-
         self._save_answers(new_result, answers_data)
 
         for old_sig in instance.signatures.all():
             self._upsert_signature(new_result, old_sig.role, old_sig.user_uid)
+
+        attachments_to_copy = [
+            ChecklistAttachment(result=new_result, file=old_att.file)
+            for old_att in instance.attachments.all()
+        ]
+        ChecklistAttachment.objects.bulk_create(attachments_to_copy)
 
         return new_result
 
@@ -201,6 +205,34 @@ class ChecklistResultService:
         origin_id = instance.origin_id or instance.id
         instance.delete()
         ChecklistResult.objects.restore_latest_deprecated(origin_id)
+
+    def add_attachment(self, result_id: int, file_obj) -> ChecklistAttachment:
+        """
+        Бизнес-логика прикрепления файла к анкете.
+
+        Бизнес-правила (Business Rules):
+        1. Запрещено добавлять файлы к историческим (устаревшим) версиям анкеты,
+           так как они заморожены для аудита.
+        2. Запрещено добавлять файлы к анкете, если она уже полностью утверждена
+           и закрыта для изменений (is_completed=True).
+
+        Args:
+            result_id (int): Идентификатор анкеты, к которой крепится файл.
+            file_obj (File): Объект загруженного файла из request.FILES.
+
+        Returns:
+            ChecklistAttachment: Созданный объект вложения.
+        """
+        result = ChecklistResult.objects.get(id=result_id)
+
+        if result.is_deprecated:
+            raise ValidationError(
+                "Нельзя добавлять файлы к устаревшей анкете.")
+        if result.is_completed:
+            raise ValidationError(
+                "Анкета закрыта, добавление файлов запрещено.")
+
+        return ChecklistAttachment.objects.create(result=result, file=file_obj)
 
     def _save_answers(self, result: ChecklistResult, answers_data: list):
         """Вспомогательный метод для сохранения ответов анкеты."""

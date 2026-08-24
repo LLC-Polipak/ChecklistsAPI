@@ -7,7 +7,7 @@ from apps.checklists.models import (
     FieldChoice,
     Template,
     TemplateField,
-    TemplateFieldGroup,
+    TemplateFieldGroup, ChecklistAttachment,
 )
 
 
@@ -124,6 +124,13 @@ class ChecklistAnswerInline(admin.TabularInline):
 
     def has_add_permission(self, request, obj=None):
         return False
+
+
+class ChecklistAttachmentInline(admin.TabularInline):
+    """Вывод прикрепленных файлов в админке."""
+    model = ChecklistAttachment
+    extra = 0
+    readonly_fields = ('uploaded_at',)
 
 
 @admin.register(ChecklistResult)
