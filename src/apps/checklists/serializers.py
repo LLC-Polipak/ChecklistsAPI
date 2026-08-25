@@ -52,6 +52,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             'field_type_display',
             'is_required',
             'order',
+            'default_value',
             'metadata',
             'choices',
         ]
@@ -59,25 +60,54 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """
-        Выполнить бизнес-валидацию поля.
+        Проверить бизнес-логику поля.
 
         Гарантировать, что варианты ответов сохраняются только для поля типа CHOICE.
-        Для остальных типов массив очищается.
+        Для остальных типов массив очищается. Также проверяет корректность
+        значения по умолчанию.
         """
         field_type = attrs.get('field_type')
         choices = attrs.get('choices', [])
 
+        default_value = attrs.get('default_value', '').strip()
+
         if field_type == FieldTypes.CHOICE:
             if not choices:
-                raise serializers.ValidationError(
-                    {
-                        'choices': 'Для типа "Выбор из списка" необходимо '
-                                   'передать хотя бы один вариант ответа.'
-                    }
-                )
-        elif choices:
-            attrs['choices'] = []
+                raise serializers.ValidationError({
+                                                      "choices": "Для типа 'Выбор из списка' передайте хотя бы один вариант."})
 
+            if default_value:
+                valid_choices = [c.get('value') for c in choices]
+                if default_value not in valid_choices:
+                    raise serializers.ValidationError({
+                        "default_value": f"Значение по умолчанию '{default_value}' недопустимо. Должно быть одним из: {valid_choices}"
+                    })
+        else:
+            if choices:
+                attrs['choices'] = []
+
+        if default_value:
+            if field_type == FieldTypes.INTEGER and not default_value.lstrip(
+                    '-').isdigit():
+                raise serializers.ValidationError({
+                                                      "default_value": "Значение по умолчанию должно быть целым числом."})
+
+            if field_type == FieldTypes.CHECKBOX and default_value.lower() not in [
+                'true', 'false', '1', '0']:
+                raise serializers.ValidationError({
+                                                      "default_value": "Для чекбокса значение по умолчанию должно быть 'true' или 'false'."})
+
+            if field_type == FieldTypes.DATE:
+                try:
+                    datetime.date.fromisoformat(default_value)
+                except ValueError:
+                    raise serializers.ValidationError({
+                                                          "default_value": "Дата по умолчанию должна быть в формате ГГГГ-ММ-ДД."})
+
+            elif field_type == FieldTypes.AUTO_DATE:
+                attrs['default_value'] = ''
+
+        attrs['default_value'] = default_value
         return attrs
 
 

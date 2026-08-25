@@ -50,7 +50,7 @@ class TemplateFieldInline(admin.TabularInline):
     model = TemplateField
     extra = 0
     show_change_link = True
-    fields = ('name', 'field_type', 'is_required', 'order', 'metadata')
+    fields = ('name', 'field_type', 'is_required', 'order', 'default_value', 'metadata')
 
 
 @admin.register(TemplateFieldGroup)
@@ -90,6 +90,7 @@ class TemplateFieldAdmin(admin.ModelAdmin):
         'get_template_info',
         'field_type',
         'is_required',
+        'default_value',
         'order',
     )
     list_filter = ('field_type', 'is_required', 'group__template__checklist_type')

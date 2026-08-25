@@ -83,6 +83,8 @@ class TemplateField(models.Model):
     field_type = models.CharField('Тип поля', max_length=20, choices=FieldTypes)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
     is_required = models.BooleanField('Обязательное поле', default=True)
+    default_value = models.TextField('Значение по умолчанию', blank=True,
+                                     default='')
 
     metadata = models.JSONField('Метаданные (Фронтенд)', default=dict, blank=True)
 
