@@ -1,15 +1,19 @@
+"""Менеджеры моделей для инкапсуляции бизнес-логики запросов к БД."""
+
 from django.db import models
 
 
 class TemplateManager(models.Manager):
     """
-    Менеджер для модели Template, предоставляющий высокоуровневые бизнес-команды.
-    Скрывает от контроллеров и сервисов сложную логику работы с базой данных.
+    Менеджер для модели Template.
+
+    Предоставляет высокоуровневые команды для работы с шаблонами,
+    скрывая детали реализации фильтрации.
     """
 
     def get_active(self, equipment_uid: str, checklist_type: str):
         """
-        Находит актуальный шаблон для заполнения анкеты.
+        Найти актуальный шаблон для заполнения анкеты.
 
         Returns:
             Объект Template со всей загруженной иерархией полей, либо None.
@@ -24,7 +28,8 @@ class TemplateManager(models.Manager):
 
     def deprecate_all(self, equipment_uid: str, checklist_type: str):
         """
-        Мягко удаляет (Soft Delete) все активные шаблоны указанного типа и оборудования.
+        Мягко удалить (Soft Delete) все активные шаблоны указанного типа.
+
         Используется при создании новой версии шаблона для сохранения историчности.
         """
         (
@@ -35,10 +40,7 @@ class TemplateManager(models.Manager):
         )
 
     def get_unique_equipments(self):
-        """
-        Мягко удаляет (Soft Delete) все активные шаблоны указанного типа и оборудования.
-        Используется при создании новой версии шаблона для сохранения историчности.
-        """
+        """Получить список уникальных идентификаторов оборудования."""
         return list(
             self.get_queryset()
             .active()
@@ -48,9 +50,10 @@ class TemplateManager(models.Manager):
 
     def restore_latest_deprecated(self, equipment_uid: str, checklist_type: str):
         """
-        Откат удаления (Rollback).
-        Если для данного оборудования не осталось активных шаблонов (например, при ошибочном удалении),
-        находит самую свежую устаревшую версию и делает её активной.
+        Выполнить откат удаления (Rollback).
+
+        Если активных шаблонов не осталось, находит самую свежую
+        устаревшую версию и делает её активной.
         """
         active_exists = (
             self.get_queryset()
@@ -73,7 +76,7 @@ class TemplateManager(models.Manager):
                 latest.save(update_fields=['is_deprecated'])
 
     def get_history(self, equipment_uid: str, checklist_type: str):
-        """Возвращает хронологическую историю всех версий шаблона (от новых к старым)."""
+        """Вернуть хронологическую историю всех версий шаблона."""
         return (
             self.get_queryset()
             .for_equipment(equipment_uid, checklist_type)
@@ -83,17 +86,18 @@ class TemplateManager(models.Manager):
 
 
 class ChecklistResultManager(models.Manager):
-    """Менеджер для модели ChecklistResult (Заполненные анкеты)."""
+    """Менеджер для управления результатами заполнения чек-листов."""
 
     def deprecate(self, result):
-        """Помечает конкретную анкету как устаревшую (используется при редактировании ответов)."""
+        """Пометить конкретную анкету как устаревшую при редактировании."""
         result.is_deprecated = True
         result.save(update_fields=['is_deprecated'])
 
     def restore_latest_deprecated(self, origin_id: int):
         """
-        Восстанавливает предыдущую версию ответов пользователя, если текущая (последняя)
-        версия анкеты была удалена администратором.
+        Восстановить предыдущую версию ответов.
+
+        Срабатывает, если текущая активная версия анкеты была удалена.
         """
         active_exists = self.get_queryset().active().related_history(origin_id).exists()
 
@@ -111,7 +115,7 @@ class ChecklistResultManager(models.Manager):
                 latest.save(update_fields=['is_deprecated'])
 
     def get_history(self, origin_id: int):
-        """Возвращает историю изменений конкретной анкеты, отсортированную от новых к старым."""
+        """Вернуть историю изменений конкретной анкеты от новых к старым."""
         return (
             self.get_queryset()
             .related_history(origin_id)

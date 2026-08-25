@@ -1,3 +1,5 @@
+"""Фильтры для управления поиском в шаблонах и результатах чек-листов."""
+
 import django_filters
 
 from apps.checklists.models import ChecklistResult, Template
@@ -5,7 +7,7 @@ from apps.checklists.models import ChecklistResult, Template
 
 class TemplateFilter(django_filters.FilterSet):
     """
-    Класс фильтрации для списка шаблонов чек-листов (используется в DRF).
+    Класс фильтрации для списка шаблонов чек-листов.
 
     Обеспечивает поиск по точным совпадениям дат (игнорируя время),
     а также по основным идентификаторам оборудования.
@@ -27,9 +29,8 @@ class ChecklistResultFilter(django_filters.FilterSet):
     """
     Класс фильтрации для заполненных анкет (результатов).
 
-    Особенности:
-    - Позволяет фильтровать анкеты по UID оборудования, даже несмотря на то,
-      что само поле `equipment_uid` находится в связанной таблице `Template`.
+    Позволяет фильтровать анкеты по UID оборудования через связанную
+    модель шаблона, а также по метаданным заполнения.
     """
 
     equipment_uid = django_filters.CharFilter(

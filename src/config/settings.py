@@ -1,3 +1,5 @@
+"""Настройки конфигурации Django для проекта."""
+
 import os
 from pathlib import Path
 
@@ -23,7 +25,6 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'drf_spectacular_sidecar',
     'corsheaders',
-    'apps.core',
     'apps.checklists',
     'apps.users',
 ]
@@ -101,7 +102,7 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = 'ru-ru'
 
 TIME_ZONE = 'UTC'
 

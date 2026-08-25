@@ -1,3 +1,5 @@
+"""Определение моделей базы данных для системы чек-листов."""
+
 from django.db import models
 
 from apps.checklists.constants import (
@@ -40,7 +42,9 @@ class Template(models.Model):
 class TemplateFieldGroup(models.Model):
     """
     Модель для группировки полей в шаблоне.
-    Включает в себя ссылку на шаблон, имя группы, а также порядок расположения в шаблоне.
+
+    Включает в себя ссылку на шаблон, имя группы, а также
+    порядок расположения в шаблоне.
     """
 
     template = models.ForeignKey(
@@ -65,9 +69,10 @@ class TemplateFieldGroup(models.Model):
 
 class TemplateField(models.Model):
     """
-    Описывает одно поле анкеты, его тип и порядок отображения.
-    Для полей с типом ``CHOICE`` список допустимых значений
-    хранится в модели ``FieldChoice``.
+    Описание одного поля анкеты.
+
+    Определяет тип данных, обязательность и порядок отображения.
+    Для типа CHOICE список значений хранится в FieldChoice.
     """
 
     group = models.ForeignKey(
@@ -97,7 +102,7 @@ class TemplateField(models.Model):
 
 class FieldChoice(models.Model):
     """
-    Допустимое значение для поля типа ``CHOICE``.
+    Допустимое значение для поля типа CHOICE.
 
     Используется для формирования списка вариантов,
     доступных пользователю при заполнении чек-листа.
@@ -122,10 +127,8 @@ class ChecklistResult(models.Model):
     """
     Заполненный экземпляр чек-листа.
 
-    Содержит информацию о шаблоне, оборудовании,
-    пользователе и времени заполнения.
-    Ответы на отдельные поля хранятся
-    в связанных объектах ``ChecklistAnswer``.
+    Содержит информацию о шаблоне, оборудовании, пользователе
+    и результатах проверки. Поддерживает версионирование через поле origin.
     """
 
     template = models.ForeignKey(
@@ -171,7 +174,7 @@ class ChecklistResult(models.Model):
         return f'{status}Анкета {self.id} от {self.user_uid}'
 
     def check_and_complete(self):
-        """Проверяет наличие Утверждающего и завершает анкету."""
+        """Проверить наличие утверждающей подписи и завершить анкету."""
         if self.is_draft:
             return
 
@@ -184,8 +187,7 @@ class ChecklistAnswer(models.Model):
     """
     Ответ пользователя на отдельное поле чек-листа.
 
-    Связывает заполненный чек-лист с полем шаблона
-    и хранит введенное пользователем значение.
+    Связывает заполненный чек-лист с конкретным полем шаблона.
     """
 
     result = models.ForeignKey(
@@ -211,7 +213,7 @@ class ChecklistAnswer(models.Model):
 
 
 class ChecklistSignature(models.Model):
-    """Модель электронных подписей для анкеты."""
+    """Модель электронной подписи для анкеты."""
 
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='signatures'
@@ -232,11 +234,14 @@ class ChecklistSignature(models.Model):
 
 class ChecklistAttachment(models.Model):
     """
-    Модель для хранения медиафайлов (фотографии дефектов, сканы документов, PDF),
-    прикрепленных к результату чек-листа.
+    Медиафайлы, прикрепленные к результату чек-листа.
+
+    Хранит фотографии дефектов или сканы документов, загруженные пользователем.
     """
-    result = models.ForeignKey(ChecklistResult, on_delete=models.CASCADE,
-                               related_name='attachments')
+
+    result = models.ForeignKey(
+        ChecklistResult, on_delete=models.CASCADE, related_name='attachments'
+    )
 
     file = models.FileField('Файл', upload_to='checklists/attachments/%Y/%m/')
     uploaded_at = models.DateTimeField('Дата загрузки', auto_now_add=True)
@@ -247,4 +252,4 @@ class ChecklistAttachment(models.Model):
         ordering = ['-uploaded_at']
 
     def __str__(self):
-        return f"Вложение к анкете {self.result_id} ({self.file.name})"
+        return f'Вложение к анкете {self.result_id} ({self.file.name})'
