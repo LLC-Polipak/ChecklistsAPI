@@ -54,4 +54,5 @@ class ChecklistResultFilter(django_filters.FilterSet):
             'is_draft',
             'is_completed',
             'is_deprecated',
+            'has_violations',
         ]

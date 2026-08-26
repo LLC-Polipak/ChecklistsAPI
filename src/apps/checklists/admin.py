@@ -1,6 +1,9 @@
 """Конфигурация административной панели для управления шаблонами и результатами."""
 
 from django.contrib import admin
+from django.urls import reverse
+from django.utils.html import format_html
+from django.utils.http import urlencode
 
 from apps.checklists.models import (
     ChecklistAnswer,
@@ -30,18 +33,26 @@ class TemplateAdmin(admin.ModelAdmin):
     Позволяет управлять метаданными шаблонов и их вложенными группами.
     """
 
-    list_display = (
-        'id',
-        'equipment_uid',
-        'checklist_type',
-        'is_deprecated',
-        'created_at',
-    )
+    list_display = ('id', 'equipment_uid', 'checklist_type', 'is_deprecated',
+                    'view_groups_link', 'created_at')
     list_filter = ('checklist_type', 'is_deprecated')
     search_fields = ('equipment_uid',)
     inlines = [TemplateFieldGroupInline]
     readonly_fields = ('created_at', 'updated_at')
     ordering = ['is_deprecated', '-created_at']
+
+    @admin.display(description='Связанные группы')
+    def view_groups_link(self, obj):
+        """Создает прямую гиперссылку на отфильтрованный список групп этого шаблона."""
+        count = obj.groups.count()
+        url = (
+                reverse('admin:checklists_templatefieldgroup_changelist')
+                + '?'
+                + urlencode({'template__id__exact': f'{obj.id}'})
+        )
+        return format_html(
+            '<a href="{}" style="font-weight: bold; color: #4F46E5;">Группы ({})</a>',
+            url, count)
 
 
 class TemplateFieldInline(admin.TabularInline):
@@ -70,6 +81,19 @@ class TemplateFieldGroupAdmin(admin.ModelAdmin):
     def get_template_info(self, obj):
         """Получить строковое представление шаблона для списка."""
         return f'{obj.template.equipment_uid} ({obj.template.get_checklist_type_display()})'
+
+    @admin.display(description='Поля')
+    def view_fields_link(self, obj):
+        """Создает прямую гиперссылку на отфильтрованный список полей этой группы."""
+        count = obj.fields.count()
+        url = (
+                reverse('admin:checklists_templatefield_changelist')
+                + '?'
+                + urlencode({'group__id__exact': f'{obj.id}'})
+        )
+        return format_html(
+            '<a href="{}" style="font-weight: bold; color: #4F46E5;">Поля ({})</a>',
+            url, count)
 
 
 class FieldChoiceInline(admin.TabularInline):
@@ -128,7 +152,7 @@ class ChecklistAnswerInline(admin.TabularInline):
 
     model = ChecklistAnswer
     extra = 0
-    readonly_fields = ('field',)
+    readonly_fields = ('field', 'is_violation')
     can_delete = False
 
     def has_add_permission(self, request, obj=None):
@@ -161,9 +185,11 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         'is_draft',
         'is_completed',
         'is_deprecated',
+        'has_violations',
         'created_at',
     )
     list_filter = (
+        'has_violations',
         'is_draft',
         'is_completed',
         'is_deprecated',

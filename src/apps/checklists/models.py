@@ -146,6 +146,8 @@ class ChecklistResult(models.Model):
     is_completed = models.BooleanField('Завершена', default=False)
     is_deprecated = models.BooleanField('Устаревшая версия', default=False)
     is_draft = models.BooleanField('Черновик', default=False)
+    has_violations = models.BooleanField('Есть отклонения', default=False,
+                                         db_index=True)
 
     origin = models.ForeignKey(
         'self',
@@ -200,6 +202,8 @@ class ChecklistAnswer(models.Model):
     )
     value = models.TextField('Текст ответа')
     comment = models.TextField('Замечание', null=True)
+    is_violation = models.BooleanField('Отклонение (Негативный ответ)',
+                                       default=False)
 
     class Meta:
         constraints = [

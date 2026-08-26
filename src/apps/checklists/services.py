@@ -224,17 +224,33 @@ class ChecklistResultService:
 
     @classmethod
     def _save_answers(cls, result: ChecklistResult, answers_data: list):
-        """Выполнить сохранение ответов анкеты."""
-        answers = [
-            ChecklistAnswer(
-                result=result,
-                field=item['field'],
-                value=item['value'],
-                comment=item['comment'],
+        """Выполнить сохранение ответов анкеты и проставить метки отклонений."""
+        has_violations = False
+        answers = []
+
+        for item in answers_data:
+            field = item['field']
+            value = item['value']
+
+            is_violation = cls._check_violation(field, value)
+            if is_violation:
+                has_violations = True
+
+            answers.append(
+                ChecklistAnswer(
+                    result=result,
+                    field=field,
+                    value=value,
+                    comment=item['comment'],
+                    is_violation=is_violation
+                )
             )
-            for item in answers_data
-        ]
+
         ChecklistAnswer.objects.bulk_create(answers)
+
+        if has_violations:
+            result.has_violations = True
+            result.save(update_fields=['has_violations'])
 
     @classmethod
     def _upsert_signature(cls, result: ChecklistResult, role: str, user_uid: str):
@@ -247,3 +263,31 @@ class ChecklistResultService:
             signature.signed_at = now()
             signature.save(update_fields=['user_uid', 'signed_at'])
         return signature, created
+
+    @classmethod
+    def _check_violation(cls, field: TemplateField, value: str) -> bool:
+        """Анализирует ответ пользователя на основе правил из метаданных поля."""
+        meta = field.metadata
+        if not meta or value == "":
+            return False
+
+        try:
+            if field.field_type == 'CHECKBOX' and 'violation_on' in meta:
+                return str(value).lower() == str(meta['violation_on']).lower()
+
+            if field.field_type == 'CHOICE' and 'violation_choices' in meta:
+                return value in meta['violation_choices']
+
+            if field.field_type == 'NUMBER':
+                num_val = float(value)
+                if 'min_valid' in meta and num_val < float(
+                    meta['min_valid']):
+                    return True
+                if 'max_valid' in meta and num_val > float(
+                    meta['max_valid']):
+                    return True
+
+        except (ValueError, TypeError):
+            pass
+
+        return False

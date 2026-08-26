@@ -68,47 +68,56 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
         """
         field_type = attrs.get('field_type')
         choices = attrs.get('choices', [])
-
         default_value = attrs.get('default_value', '').strip()
 
-        if field_type == FieldTypes.CHOICE:
-            if not choices:
-                raise serializers.ValidationError({
-                                                      "choices": "Для типа 'Выбор из списка' передайте хотя бы один вариант."})
+        if field_type == FieldTypes.CHOICE and not choices:
+            raise serializers.ValidationError({
+                                                  "choices": "Для типа 'Выбор из списка' передайте хотя бы один вариант."})
+        if field_type != FieldTypes.CHOICE:
+            attrs['choices'] = []
 
-            if default_value:
-                valid_choices = [c.get('value') for c in choices]
-                if default_value not in valid_choices:
-                    raise serializers.ValidationError({
-                        "default_value": f"Значение по умолчанию '{default_value}' недопустимо. Должно быть одним из: {valid_choices}"
-                    })
-        else:
-            if choices:
-                attrs['choices'] = []
+        if field_type == FieldTypes.AUTO:
+            default_value = ''
 
         if default_value:
-            if field_type == FieldTypes.INTEGER and not default_value.lstrip(
-                    '-').isdigit():
-                raise serializers.ValidationError({
-                                                      "default_value": "Значение по умолчанию должно быть целым числом."})
+            method_name = f"_validate_default_{field_type.lower()}"
+            validator_method = getattr(self, method_name, None)
 
-            if field_type == FieldTypes.CHECKBOX and default_value.lower() not in [
-                'true', 'false', '1', '0']:
-                raise serializers.ValidationError({
-                                                      "default_value": "Для чекбокса значение по умолчанию должно быть 'true' или 'false'."})
-
-            if field_type == FieldTypes.DATE:
-                try:
-                    datetime.date.fromisoformat(default_value)
-                except ValueError:
-                    raise serializers.ValidationError({
-                                                          "default_value": "Дата по умолчанию должна быть в формате ГГГГ-ММ-ДД."})
-
-            elif field_type == FieldTypes.AUTO_DATE:
-                attrs['default_value'] = ''
+            if validator_method:
+                error_msg = validator_method(default_value, choices=choices)
+                if error_msg:
+                    raise serializers.ValidationError(
+                        {"default_value": error_msg})
 
         attrs['default_value'] = default_value
         return attrs
+
+    def _validate_default_integer(self, default_value, **kwargs):
+        """Вспомогательный метод для валидации значения по умолчанию для типа INTEGER."""
+        if not default_value.lstrip('-').isdigit():
+            return "Значение по умолчанию должно быть целым числом."
+        return None
+
+    def _validate_default_choice(self, default_value, choices, **kwargs):
+        """Вспомогательный метод для валидации значения по умолчанию для типа CHOICE."""
+        valid_choices = [c.get('value') for c in choices]
+        if default_value not in valid_choices:
+            return f"Значение '{default_value}' недопустимо. Варианты: {valid_choices}"
+        return None
+
+    def _validate_default_checkbox(self, default_value, **kwargs):
+        """Вспомогательный метод для валидации значения по умолчанию для типа CHECKBOX."""
+        if default_value.lower() not in ['true', 'false', '1', '0']:
+            return "Для чекбокса значение по умолчанию должно быть 'true' или 'false'."
+        return None
+
+    def _validate_default_date(self, default_value, **kwargs):
+        """Вспомогательный метод для валидации значения по умолчанию для типа DATE."""
+        try:
+            import datetime
+            datetime.date.fromisoformat(default_value)
+        except ValueError:
+            return "Дата по умолчанию должна быть в формате ГГГГ-ММ-ДД."
 
 
 class AnswerItemSerializer(serializers.Serializer):
@@ -462,6 +471,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
             'field_type_display',
             'value',
             'comment',
+            'is_violation'
         ]
 
 
@@ -512,6 +522,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'is_draft',
             'is_completed',
             'is_deprecated',
+            'has_violations',
             'general_comment',
             'created_at',
             'updated_at',
