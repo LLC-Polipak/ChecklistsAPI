@@ -9,6 +9,7 @@ psycopg[binary]==3.2.*
 
 # --- Data & Integrations ---
 openpyxl==3.1.*
+reportlab==5.0.*
 
 # --- API ---
 djangorestframework==3.16.*

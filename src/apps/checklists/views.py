@@ -9,7 +9,8 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from apps.checklists.export_service import ChecklistExcelExporter
+from apps.checklists.export_service import ChecklistExcelExporter, \
+    ChecklistPDFExporter
 from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
 from apps.checklists.models import ChecklistResult, Template
 from apps.checklists.serializers import (
@@ -89,15 +90,6 @@ class TemplateViewSet(viewsets.ModelViewSet):
         )
         serializer = self.get_serializer(history_queryset, many=True)
         return Response(serializer.data)
-
-    @action(detail=False, methods=['get'])
-    def equipments(self, request):
-        """
-        Получить массив уникальных UID оборудования.
-
-        Используется фронтендом для реализации автодополнения (Autocomplete).
-        """
-        return Response(Template.objects.get_unique_equipments())
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -231,6 +223,30 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
         safe_uid = str(result.template.equipment_uid).replace(' ', '_')
         filename = f'Checklist_Result_{result.id}_{safe_uid}.xlsx'
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
+
+    @extend_schema(
+        summary="Экспорт анкеты в PDF",
+        description="Генерирует PDF-файл печатного бланка анкеты.",
+        responses={
+            200: OpenApiTypes.BINARY
+        }
+    )
+    @action(detail=True, methods=['get'])
+    def export_pdf(self, request, pk=None):
+        result = self.get_object()
+
+        pdf_bytes = ChecklistPDFExporter.export(result)
+
+        response = HttpResponse(
+            pdf_bytes,
+            content_type='application/pdf'
+        )
+
+        safe_uid = str(result.template.equipment_uid).replace(' ', '_')
+        filename = f"Checklist_Result_{result.id}_{safe_uid}.pdf"
         response['Content-Disposition'] = f'attachment; filename="{filename}"'
 
         return response
