@@ -76,7 +76,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
         if field_type != FieldTypes.CHOICE:
             attrs['choices'] = []
 
-        if field_type == FieldTypes.AUTO:
+        if field_type == FieldTypes.AUTO_DATE:
             default_value = ''
 
         if default_value:
