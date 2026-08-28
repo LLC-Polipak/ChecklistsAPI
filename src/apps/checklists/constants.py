@@ -30,6 +30,7 @@ class FieldTypes(models.TextChoices):
     INTEGER = 'INTEGER', 'Целое число'
     CHOICE = 'CHOICE', 'Выбор из списка'
     CHECKBOX = 'CHECKBOX', 'Чекбокс'
+    RADIO = 'RADIO', 'Радио-кнопки (Да/Нет)'
     DATE = 'DATE', 'Дата'
     AUTO_DATE = 'AUTO_DATE', 'Автоматическая дата'
 

@@ -9,8 +9,11 @@ from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from apps.checklists.export_service import ChecklistExcelExporter, \
-    ChecklistPDFExporter
+from apps.checklists.export_service import (
+    ChecklistExportDirector,
+    ExcelChecklistBuilder,
+    PdfChecklistBuilder,
+)
 from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
 from apps.checklists.models import ChecklistResult, Template
 from apps.checklists.serializers import (
@@ -208,23 +211,22 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def export_excel(self, request, pk=None):
         """
-        Сгенерировать и отдать Excel-файл для скачивания.
+        Сгенерировать и отдать Excel-файл анкеты для скачивания.
 
         Эндпоинт: GET /api/v1/results/{id}/export_excel/.
         """
         result = self.get_object()
 
-        excel_bytes = ChecklistExcelExporter.export(result)
+        builder = ExcelChecklistBuilder(result)
+        director = ChecklistExportDirector(builder)
+        excel_bytes = director.construct_document()
 
-        response = HttpResponse(
-            excel_bytes,
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        )
+        response = HttpResponse(excel_bytes,
+                                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
         safe_uid = str(result.template.equipment_uid).replace(' ', '_')
-        filename = f'Checklist_Result_{result.id}_{safe_uid}.xlsx'
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
+        response[
+            'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.xlsx"'
         return response
 
     @extend_schema(
@@ -236,19 +238,22 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['get'])
     def export_pdf(self, request, pk=None):
+        """
+        Сгенерировать и отдать PDF-файл анкеты для скачивания.
+
+        Эндпоинт: GET /api/v1/results/{id}/export_pdf/.
+        """
         result = self.get_object()
 
-        pdf_bytes = ChecklistPDFExporter.export(result)
+        builder = PdfChecklistBuilder(result)
+        director = ChecklistExportDirector(builder)
+        pdf_bytes = director.construct_document()
 
-        response = HttpResponse(
-            pdf_bytes,
-            content_type='application/pdf'
-        )
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
 
         safe_uid = str(result.template.equipment_uid).replace(' ', '_')
-        filename = f"Checklist_Result_{result.id}_{safe_uid}.pdf"
-        response['Content-Disposition'] = f'attachment; filename="{filename}"'
-
+        response[
+            'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.pdf"'
         return response
 
     @extend_schema(

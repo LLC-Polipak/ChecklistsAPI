@@ -107,9 +107,11 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
 
     def _validate_default_checkbox(self, default_value, **kwargs):
         """Вспомогательный метод для валидации значения по умолчанию для типа CHECKBOX."""
-        if default_value.lower() not in ['true', 'false', '1', '0']:
-            return "Для чекбокса значение по умолчанию должно быть 'true' или 'false'."
-        return None
+        return self._validate_boolean(default_value)
+
+    def _validate_default_radio(self, default_value, **kwargs):
+        """Вспомогательный метод для валидации значения по умолчанию для типа RADIO."""
+        return self._validate_boolean(default_value)
 
     def _validate_default_date(self, default_value, **kwargs):
         """Вспомогательный метод для валидации значения по умолчанию для типа DATE."""
@@ -118,6 +120,12 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             datetime.date.fromisoformat(default_value)
         except ValueError:
             return "Дата по умолчанию должна быть в формате ГГГГ-ММ-ДД."
+
+    def _validate_boolean(self, default_value):
+        """Вспомошательный метод для валидации булевых значений."""
+        if default_value.lower() not in ['true', 'false', '1', '0']:
+            return "Для чекбокса значение по умолчанию должно быть 'true' или 'false'."
+        return None
 
 
 class AnswerItemSerializer(serializers.Serializer):
@@ -425,9 +433,11 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
     def _validate_checkbox(self, field, value):
         """Метод для валидации поля с типом CHECKBOX."""
-        if value.lower() not in ['true', 'false', '1', '0']:
-            return f"Поле '{field.name}' должно быть логическим (true/false)."
-        return None
+        return self._validate_boolean(field, value)
+
+    def _validate_radio(self, field, value):
+        """Метод для валидации поля с типом RADIO."""
+        return self._validate_boolean(field, value)
 
     def _validate_date(self, field, value):
         """Метод для валидации поля с типом DATE."""
@@ -435,6 +445,12 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
             datetime.date.fromisoformat(value)
         except ValueError:
             return f"Поле '{field.name}' должно быть корректной датой в формате ГГГГ-ММ-ДД."
+
+    def _validate_boolean(self, field, value):
+        """Вспомогательный метод для валидации булевых значений."""
+        if value.lower() not in ['true', 'false', '1', '0']:
+            return f"Поле '{field.name}' должно быть логическим (true/false)."
+        return None
 
     @staticmethod
     def _check_missing_required_fields(template_fields, answers_data,
