@@ -48,8 +48,12 @@ class ExcelChecklistBuilder(IChecklistBuilder):
     с библиотекой openpyxl, стилизацию ячеек и компоновку данных.
     """
 
-    def __init__(self, result: ChecklistResult):
+    def __init__(self, result: ChecklistResult,
+                 document_code: str, machine_name: str | None = None):
         self.result = result
+        self.document_code = document_code
+        self.machine_name = machine_name or result.template.equipment_uid
+
         self.wb = openpyxl.Workbook()
         self.ws = self.wb.active
         self.ws.title = "Журнал смены"
@@ -83,9 +87,7 @@ class ExcelChecklistBuilder(IChecklistBuilder):
         self.ws.cell(row=2, column=1,
                      value="Журнал приема-передачи смены").alignment = self.align_center
 
-        self.ws.cell(row=3, column=5,
-                     value="Код документа ФЗ-Ж04-П1").alignment = self.align_right
-        self.current_row = 5
+        self.ws.cell(row=self.current_row, column=2, value=self.machine_name).font = self.font_equipment
 
         date_str = self.result.created_at.strftime("%d.%m.%Y")
         shift_str = self.result.get_shift_number_display() or "___"
@@ -113,7 +115,7 @@ class ExcelChecklistBuilder(IChecklistBuilder):
         self.ws.cell(row=self.current_row, column=1,
                      value="Техническое состояние оборудования").font = self.font_bold
         self.ws.cell(row=self.current_row, column=2,
-                     value=self.result.template.equipment_uid).font = self.font_equipment
+                     value=self.machine_name).font = self.font_equipment
         self.current_row += 1
 
         answers = self.result.answers.select_related('field__group').order_by(
@@ -193,7 +195,7 @@ class ExcelChecklistBuilder(IChecklistBuilder):
         stream.seek(0)
         return stream.getvalue()
 
-    def _apply_row_borders(self, row, start_col=1, end_col=7):
+    def _apply_row_borders(self, row, start_col=1, end_col=5):
         """Вспомогательный метод для отрисовки сетки на всю строку."""
         for col in range(start_col, end_col + 1):
             cell = self.ws.cell(row=row, column=col)
@@ -201,7 +203,7 @@ class ExcelChecklistBuilder(IChecklistBuilder):
             cell.alignment = self.align_wrap
 
     def _get_options_display(self, ans):
-        """Формирует две колонки с вариантами ответов и метками [V] / [ ]"""
+        """Формирует две колонки с вариантами ответов и метками [V] / [ ]."""
         opt1, opt2 = "", ""
         val = str(ans.value).strip()
 
@@ -233,8 +235,11 @@ class PdfChecklistBuilder(IChecklistBuilder):
     Сгенерировать документ по структуре, аналогичной Excel (печатный бланк).
     """
 
-    def __init__(self, result: ChecklistResult):
+    def __init__(self, result: ChecklistResult,
+                 document_code: str, machine_name: str | None = None):
         self.result = result
+        self.document_code = document_code
+        self.machine_name = machine_name or result.template.equipment_uid
         self.elements = []
 
         font_path = os.path.join(settings.BASE_DIR, 'arial.ttf')
@@ -277,7 +282,7 @@ class PdfChecklistBuilder(IChecklistBuilder):
         self.elements.append(Paragraph("Приложение № 1", center_style))
         self.elements.append(
             Paragraph("Журнал приема-передачи смены", center_style))
-        self.elements.append(Paragraph("Код документа ФЗ-Ж04-П1", right_style))
+        self.elements.append(Paragraph(f"Код документа {self.document_code}", right_style))
         self.elements.append(Spacer(1, 15))
 
         date_str = self.result.created_at.strftime("%d.%m.%Y")
@@ -314,8 +319,7 @@ class PdfChecklistBuilder(IChecklistBuilder):
         data_head = [
             [Paragraph("<b>Техническое состояние оборудования</b>",
                        bold_style),
-             Paragraph(f"<b>{self.result.template.equipment_uid}</b>",
-                       eq_style)]
+             Paragraph(f"<b>{escape(self.machine_name)}</b>", eq_style)]
         ]
         th = Table(data_head, colWidths=[250, 290])
         self.elements.append(th)
@@ -424,7 +428,7 @@ class PdfChecklistBuilder(IChecklistBuilder):
         return stream.getvalue()
 
     def _get_options_display(self, ans):
-        """Такая же логика меток [V], как и для Excel"""
+        """Такая же логика меток [V], как и для Excel."""
         opt1, opt2 = "", ""
         val = str(ans.value).strip()
 

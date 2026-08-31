@@ -3,7 +3,7 @@
 from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema, inline_serializer
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
 from rest_framework import filters, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -103,8 +103,9 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     аудиторский след (Audit Trail) при редактировании анкет.
     """
 
-    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
-        'answers__field'
+    queryset = ChecklistResult.objects.select_related(
+        'template').prefetch_related(
+        'answers__field__group', 'signatures', 'attachments'
     )
 
     filter_backends = [
@@ -206,6 +207,12 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     @extend_schema(
         summary='Экспорт анкеты в Excel',
         description='Генерирует Excel-файл со всеми ответами, комментариями и подписями.',
+        parameters=[
+            OpenApiParameter(name='document_code', required=False, type=str,
+                             description="Код документа"),
+            OpenApiParameter(name='machine_name', required=False, type=str,
+                             description="Человекочитаемое имя машины"),
+        ],
         responses={200: OpenApiTypes.BINARY},
     )
     @action(detail=True, methods=['get'])
@@ -217,14 +224,22 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         """
         result = self.get_object()
 
-        builder = ExcelChecklistBuilder(result)
+        doc_code = request.query_params.get('document_code', 'ФЗ-Ж04-П1')
+        machine_name = request.query_params.get('machine_name',
+                                                result.template.equipment_uid)
+
+        builder = ExcelChecklistBuilder(
+            result,
+            doc_code,
+            machine_name
+        )
         director = ChecklistExportDirector(builder)
         excel_bytes = director.construct_document()
 
         response = HttpResponse(excel_bytes,
                                 content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-        safe_uid = str(result.template.equipment_uid).replace(' ', '_')
+        safe_uid = str(machine_name).replace(' ', '_')
         response[
             'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.xlsx"'
         return response
@@ -232,6 +247,12 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     @extend_schema(
         summary="Экспорт анкеты в PDF",
         description="Генерирует PDF-файл печатного бланка анкеты.",
+        parameters=[
+            OpenApiParameter(name='document_code', required=False, type=str,
+                             description="Код документа"),
+            OpenApiParameter(name='machine_name', required=False, type=str,
+                             description="Человекочитаемое имя машины"),
+        ],
         responses={
             200: OpenApiTypes.BINARY
         }
@@ -245,13 +266,21 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         """
         result = self.get_object()
 
-        builder = PdfChecklistBuilder(result)
+        doc_code = request.query_params.get('document_code', 'ФЗ-Ж04-П1')
+        machine_name = request.query_params.get('machine_name',
+                                                result.template.equipment_uid)
+
+        builder = PdfChecklistBuilder(
+            result,
+            doc_code,
+            machine_name
+        )
         director = ChecklistExportDirector(builder)
         pdf_bytes = director.construct_document()
 
         response = HttpResponse(pdf_bytes, content_type='application/pdf')
 
-        safe_uid = str(result.template.equipment_uid).replace(' ', '_')
+        safe_uid = str(machine_name).replace(' ', '_')
         response[
             'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.pdf"'
         return response

@@ -2,6 +2,7 @@
 
 import datetime
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
@@ -42,6 +43,8 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
     field_type_display = serializers.CharField(
         source='get_field_type_display', read_only=True
     )
+
+    metadata = serializers.DictField(required=False, default=dict)
 
     class Meta:
         model = TemplateField
@@ -135,6 +138,13 @@ class AnswerItemSerializer(serializers.Serializer):
     comment = serializers.CharField(allow_blank=True, required=False, default='')
 
 
+class AnswerGroupSerializer(serializers.Serializer):
+    """Представить ответ с полями, входящие в эту группу."""
+
+    group_id = serializers.IntegerField(help_text="ID группы полей из шаблона")
+    answers = serializers.DictField(child=AnswerItemSerializer(), allow_empty=True)
+
+
 class TemplateFieldGroupSerializer(serializers.ModelSerializer):
     """Представить группу полей шаблона."""
 
@@ -191,6 +201,7 @@ class TemplateSerializer(serializers.ModelSerializer):
         model = Template
         read_only_fields = ['id', 'created_at', 'updated_at', 'has_results']
 
+    @extend_schema_field(serializers.BooleanField())
     def get_has_results(self, obj):
         """Проверить существование заполненной анкеты на данный шаблон."""
         return obj.results.exists()
@@ -270,7 +281,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     shift_number = serializers.ChoiceField(choices=ShiftTypes, required=False)
     shift_time = serializers.DateTimeField(required=False, allow_null=True)
     is_draft = serializers.BooleanField(default=False)
-    answers = serializers.DictField(child=AnswerItemSerializer(), allow_empty=True)
+    groups = AnswerGroupSerializer(many=True, allow_empty=True)
     general_comment = serializers.CharField(
         allow_blank=True, required=False, default=''
     )
@@ -288,7 +299,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         2. Проверить отсутствие пропущенных обязательных полей.
         3. Запустить проверку типов данных для каждого ответа.
         """
-        answers_data = attrs.get('answers', {})
+        groups_data = attrs.get('groups', [])
         is_draft = attrs.get('is_draft', False)
 
         template = self._get_active_template(attrs)
@@ -297,6 +308,27 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         for group in template.groups.all():
             for f in group.fields.all():
                 template_fields[str(f.id)] = f
+
+        answers_data = {}
+        errors = {}
+
+        for group_item in groups_data:
+            g_id = group_item['group_id']
+            for f_id, ans_obj in group_item['answers'].items():
+                if f_id not in template_fields:
+                    errors[f_id] = "Поле не принадлежит этому шаблону."
+                    continue
+
+                field = template_fields[f_id]
+                if field.group_id != g_id:
+                    errors[
+                        f_id] = f"Поле '{field.name}' принадлежит группе ID {field.group_id}, а передано в группе ID {g_id}."
+                    continue
+
+                answers_data[f_id] = ans_obj
+
+        if errors:
+            raise ValidationError(errors)
 
         self._check_missing_required_fields(template_fields, answers_data, is_draft)
         validated_answers = self._process_and_validate_answers(
@@ -507,6 +539,17 @@ class ChecklistAttachmentUploadSerializer(serializers.ModelSerializer):
         fields = ['file']
 
 
+class OutputGroupItemSerializer(serializers.Serializer):
+    """
+    Вспомогательный сериализатор исключительно для Swagger.
+
+    Отвечает за отрисовку правильной схемы ответа для групп.
+    """
+    group_id = serializers.IntegerField()
+    group_name = serializers.CharField()
+    answers = ChecklistAnswerSerializer(many=True)
+
+
 class ChecklistResultListSerializer(serializers.ModelSerializer):
     """Представить историю и детальную информацию заполненных анкет."""
 
@@ -520,7 +563,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
         source='template.equipment_uid', read_only=True
     )
 
-    answers = ChecklistAnswerSerializer(many=True)
+    groups = serializers.SerializerMethodField()
     attachments = ChecklistAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
@@ -543,9 +586,32 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'signatures',
-            'answers',
+            'groups',
             'attachments',
         ]
+
+    @extend_schema_field(OutputGroupItemSerializer(many=True))
+    def get_groups(self, obj):
+        """Группирует плоский список ответов по их группам из шаблона."""
+        groups_map = {}
+        for ans in obj.answers.all():
+            group = ans.field.group
+            if group.id not in groups_map:
+                groups_map[group.id] = {
+                    "group_id": group.id,
+                    "group_name": group.name,
+                    "order": group.order,
+                    "answers": []
+                }
+            groups_map[group.id]["answers"].append(
+                ChecklistAnswerSerializer(ans).data)
+
+        sorted_groups = sorted(groups_map.values(), key=lambda x: x['order'])
+
+        for g in sorted_groups:
+            g.pop('order', None)
+
+        return sorted_groups
 
 
 class ChecklistSignatureSerializer(serializers.ModelSerializer):
