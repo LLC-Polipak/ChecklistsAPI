@@ -101,6 +101,13 @@ class TemplateField(models.Model):
     def __str__(self):
         return f'{self.name}({self.get_field_type_display()})'
 
+    def save(self, *args, **kwargs):
+        """Перехватывает сохранение в БД для поддержания консистентности."""
+        super().save(*args, **kwargs)
+
+        if self.field_type != FieldTypes.CHOICE:
+            self.choices.all().delete()
+
 
 class FieldChoice(models.Model):
     """

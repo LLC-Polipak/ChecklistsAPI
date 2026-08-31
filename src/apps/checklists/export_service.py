@@ -87,7 +87,9 @@ class ExcelChecklistBuilder(IChecklistBuilder):
         self.ws.cell(row=2, column=1,
                      value="Журнал приема-передачи смены").alignment = self.align_center
 
-        self.ws.cell(row=self.current_row, column=2, value=self.machine_name).font = self.font_equipment
+        self.ws.cell(row=3, column=5,
+                     value=f"Код документа {self.document_code}").alignment = self.align_right
+        self.current_row = 5
 
         date_str = self.result.created_at.strftime("%d.%m.%Y")
         shift_str = self.result.get_shift_number_display() or "___"

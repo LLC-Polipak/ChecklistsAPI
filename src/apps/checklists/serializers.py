@@ -335,6 +335,10 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
             template_fields, answers_data, is_draft
         )
 
+        attrs.pop('groups', None)
+        attrs.pop('equipment_uid', None)
+        attrs.pop('checklist_type', None)
+
         attrs['template'] = template
         attrs['validated_answers'] = validated_answers
         return attrs
@@ -545,6 +549,7 @@ class OutputGroupItemSerializer(serializers.Serializer):
 
     Отвечает за отрисовку правильной схемы ответа для групп.
     """
+
     group_id = serializers.IntegerField()
     group_name = serializers.CharField()
     answers = ChecklistAnswerSerializer(many=True)
