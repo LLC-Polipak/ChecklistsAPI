@@ -40,7 +40,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
     """
 
     choices = FieldChoiceSerializer(many=True, required=False)
-    field_type_verbose = serializers.CharField(
+    field_type_display = serializers.CharField(
         source='get_field_type_display', read_only=True
     )
 
@@ -52,7 +52,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             'id',
             'name',
             'field_type',
-            'field_type_verbose',
+            'field_type_display',
             'is_required',
             'order',
             'default_value',
@@ -181,7 +181,7 @@ class TemplateSerializer(serializers.ModelSerializer):
     """
 
     groups = TemplateFieldGroupSerializer(many=True)
-    checklist_type_verbose = serializers.CharField(
+    checklist_type_display = serializers.CharField(
         source='get_checklist_type_display', read_only=True
     )
 
@@ -191,7 +191,7 @@ class TemplateSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'equipment_uid',
-            'checklist_type_verbose',
+            'checklist_type_display',
             'checklist_type',
             'created_at',
             'updated_at',
@@ -514,7 +514,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
     field_name = serializers.CharField(source='field.name')
     field_type = serializers.CharField(source='field.field_type')
 
-    field_type_verbose = serializers.CharField(
+    field_type_display = serializers.CharField(
         source='field.get_field_type_display', read_only=True
     )
 
@@ -524,7 +524,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
             'field_id',
             'field_name',
             'field_type',
-            'field_type_verbose',
+            'field_type_display',
             'value',
             'comment',
             'is_violation'
@@ -565,7 +565,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     checklist_type = serializers.CharField(
         source='template.checklist_type', read_only=True
     )
-    checklist_type_verbose = serializers.CharField(
+    checklist_type_display = serializers.CharField(
         source='template.get_checklist_type_display', read_only=True
     )
     equipment_uid = serializers.CharField(
@@ -584,7 +584,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'external_id',
             'source_service',
             'checklist_type',
-            'checklist_type_verbose',
+            'checklist_type_display',
             'shift_number',
             'shift_time',
             'is_draft',
@@ -626,11 +626,11 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
 class ChecklistSignatureSerializer(serializers.ModelSerializer):
     """Представить электронную подпись анкеты."""
 
-    role_verbose = serializers.CharField(source='get_role_display', read_only=True)
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
 
     class Meta:
         model = ChecklistSignature
-        fields = ['role', 'role_verbose', 'user_uid', 'signed_at']
+        fields = ['role', 'role_display', 'user_uid', 'signed_at']
 
 
 class ChecklistSignSerializer(serializers.Serializer):
