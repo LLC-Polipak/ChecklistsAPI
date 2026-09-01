@@ -288,7 +288,18 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     @extend_schema(
         summary='Прикрепить файл к анкете',
         description='Загрузка фото/документов. Файл нужно передавать через form-data.',
-        request=ChecklistAttachmentUploadSerializer,
+        request={
+            'multipart/form-data': {
+                'type': 'object',
+                'properties': {
+                    'file': {
+                        'type': 'string',
+                        'format': 'binary'
+                    }
+                },
+                'required': ['file']
+            }
+        },
         responses={201: ChecklistAttachmentSerializer},
     )
     @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])

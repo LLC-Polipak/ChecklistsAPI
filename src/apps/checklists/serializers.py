@@ -518,6 +518,8 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
         source='field.get_field_type_display', read_only=True
     )
 
+    metadata = serializers.JSONField(source='field.metadata', read_only=True)
+
     class Meta:
         model = ChecklistAnswer
         fields = [
@@ -525,6 +527,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
             'field_name',
             'field_type',
             'field_type_display',
+            'metadata',
             'value',
             'comment',
             'is_violation'
@@ -559,6 +562,41 @@ class OutputGroupItemSerializer(serializers.Serializer):
     answers = ChecklistAnswerSerializer(many=True)
 
 
+class ChecklistSignSerializer(serializers.Serializer):
+    """Валидировать запрос на постановку подписи в анкету."""
+
+    role = serializers.ChoiceField(
+        choices=SignatureRoles,
+        help_text='Роль подписанта (например, APPROVER).',
+    )
+    user_uid = serializers.CharField(
+        max_length=255, help_text='UID пользователя, ставящего подпись.'
+    )
+
+    def validate(self, attrs):
+        """
+        Проверить возможность подписания анкеты в текущем статусе.
+
+        Запрещает подпись черновиков, устаревших или закрытых анкет.
+        """
+        result = self.context.get('result')
+        role = attrs.get('role')
+
+        if result:
+            if result.is_draft:
+                raise ValidationError(
+                    "Нельзя подписать черновик. Сначала сохраните анкету как чистовик."
+                )
+            if result.is_deprecated:
+                raise ValidationError("Нельзя подписать устаревшую анкету.")
+            if result.is_completed and role != SignatureRoles.READER:
+                raise ValidationError(
+                    "Анкета закрыта. Разрешены только подписи Читателя."
+                )
+
+        return attrs
+
+
 class ChecklistResultListSerializer(serializers.ModelSerializer):
     """Представить историю и детальную информацию заполненных анкет."""
 
@@ -571,6 +609,8 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     equipment_uid = serializers.CharField(
         source='template.equipment_uid', read_only=True
     )
+
+    signatures = ChecklistSignSerializer(many=True, read_only=True)
 
     groups = serializers.SerializerMethodField()
     attachments = ChecklistAttachmentSerializer(many=True, read_only=True)
@@ -631,38 +671,3 @@ class ChecklistSignatureSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChecklistSignature
         fields = ['role', 'role_display', 'user_uid', 'signed_at']
-
-
-class ChecklistSignSerializer(serializers.Serializer):
-    """Валидировать запрос на постановку подписи в анкету."""
-
-    role = serializers.ChoiceField(
-        choices=SignatureRoles,
-        help_text='Роль подписанта (например, APPROVER).',
-    )
-    user_uid = serializers.CharField(
-        max_length=255, help_text='UID пользователя, ставящего подпись.'
-    )
-
-    def validate(self, attrs):
-        """
-        Проверить возможность подписания анкеты в текущем статусе.
-
-        Запрещает подпись черновиков, устаревших или закрытых анкет.
-        """
-        result = self.context.get('result')
-        role = attrs.get('role')
-
-        if result:
-            if result.is_draft:
-                raise ValidationError(
-                    "Нельзя подписать черновик. Сначала сохраните анкету как чистовик."
-                )
-            if result.is_deprecated:
-                raise ValidationError("Нельзя подписать устаревшую анкету.")
-            if result.is_completed and role != SignatureRoles.READER:
-                raise ValidationError(
-                    "Анкета закрыта. Разрешены только подписи Читателя."
-                )
-
-        return attrs

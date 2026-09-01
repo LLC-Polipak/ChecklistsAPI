@@ -215,3 +215,27 @@ class ChecklistResultAdmin(admin.ModelAdmin):
     def get_equipment(self, obj):
         """Получить UID оборудования из связанного шаблона."""
         return obj.template.equipment_uid
+
+    @admin.display(description='Отклонения', ordering='has_violations')
+    def get_has_violations(self, obj):
+        """Метод для понятной простому человеку отрисовки отклонений в анкете."""
+        if obj.has_violations:
+            return format_html(
+                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>')
+        return format_html('<span style="color: #16A34A;">Нет</span>')
+
+    @admin.display(description='Черновик', ordering='is_draft')
+    def get_is_draft(self, obj):
+        """Метод для понятной простому человеку отрисовки статуса черновика анкеты."""
+        if obj.is_draft:
+            return format_html(
+                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
+        return "Нет (Чистовик)"
+
+    @admin.display(description='Устарела', ordering='is_deprecated')
+    def get_is_deprecated(self, obj):
+        """Метод для понятной простому человеку отрисовки неактуальности анкеты."""
+        if obj.is_deprecated:
+            return format_html(
+                '<span style="color: #9CA3AF;">Да (В архиве)</span>')
+        return "Нет"
