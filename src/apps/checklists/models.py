@@ -167,7 +167,8 @@ class ChecklistResult(models.Model):
 
     created_at = models.DateTimeField('Дата заполнения', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
-    general_comment = models.TextField('Общий комментарий', null=True)
+    general_comment = models.TextField('Общий комментарий', null=True,
+                                       blank=True)
 
     external_id = models.CharField(
         'Внешний ID', max_length=255, null=True, db_index=True
@@ -208,7 +209,7 @@ class ChecklistAnswer(models.Model):
         TemplateField, on_delete=models.PROTECT, related_name='answers'
     )
     value = models.TextField('Текст ответа')
-    comment = models.TextField('Замечание', null=True)
+    comment = models.TextField('Замечание', null=True, blank=True)
     is_violation = models.BooleanField('Отклонение (Негативный ответ)',
                                        default=False)
 

@@ -2,7 +2,6 @@
 
 import datetime
 
-from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
@@ -510,6 +509,8 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
 
 class AnswerMetadataSerializer(serializers.Serializer):
+    """Сериализатор для возможного представления данных, хранящихся в метадате."""
+
     bool_true_label = serializers.CharField(allow_null=True)
     bool_false_label = serializers.CharField(allow_null=True)
     comment_label = serializers.CharField(allow_null=True)
