@@ -153,7 +153,7 @@ class TemplateFieldGroupSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TemplateFieldGroup
-        fields = ['id', 'name', 'order', 'fields']
+        fields = ['id', 'name', 'order', 'page_break', 'fields']
         read_only_fields = ['id']
 
     def validate_fields(self, value):

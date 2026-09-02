@@ -52,6 +52,7 @@ class TemplateFieldGroup(models.Model):
     )
     name = models.CharField('Название группы', max_length=255)
     order = models.PositiveIntegerField('Порядок отображения группы', default=0)
+    page_break = models.BooleanField('Разрыв страницы', default=False)
 
     class Meta:
         ordering = ['order', 'id']
