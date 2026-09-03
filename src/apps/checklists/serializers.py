@@ -32,6 +32,14 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
         fields = ['value', 'order']
 
 
+class FieldMetadataSerializer(serializers.Serializer):
+    """Сериализатор для возможного представления данных, хранящихся в метадате поля."""
+
+    bool_true_label = serializers.CharField(allow_null=True, allow_blank=True)
+    bool_false_label = serializers.CharField(allow_null=True, allow_blank=True)
+    comment_label = serializers.CharField(allow_null=True, allow_blank=True)
+
+
 class TemplateFieldSerializer(serializers.ModelSerializer):
     """
     Сериализовать поле шаблона анкеты.
@@ -44,7 +52,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
         source='get_field_type_display', read_only=True
     )
 
-    metadata = serializers.DictField(required=False, default=dict)
+    metadata = FieldMetadataSerializer(read_only=True)
 
     class Meta:
         model = TemplateField
@@ -508,14 +516,6 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
             )
 
 
-class AnswerMetadataSerializer(serializers.Serializer):
-    """Сериализатор для возможного представления данных, хранящихся в метадате."""
-
-    bool_true_label = serializers.CharField(allow_null=True)
-    bool_false_label = serializers.CharField(allow_null=True)
-    comment_label = serializers.CharField(allow_null=True)
-
-
 class ChecklistAnswerSerializer(serializers.ModelSerializer):
     """Представить ответ пользователя с метаданными поля."""
 
@@ -526,7 +526,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
         source='field.get_field_type_display', read_only=True
     )
 
-    metadata = AnswerMetadataSerializer(source='field.metadata', read_only=True)
+    metadata = FieldMetadataSerializer(source='field.metadata', read_only=True)
 
     class Meta:
         model = ChecklistAnswer
@@ -567,6 +567,7 @@ class OutputGroupItemSerializer(serializers.Serializer):
 
     group_id = serializers.IntegerField()
     group_name = serializers.CharField()
+    page_break = serializers.BooleanField()
     answers = ChecklistAnswerSerializer(many=True)
 
 
@@ -658,6 +659,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
                     "group_id": group.id,
                     "group_name": group.name,
                     "order": group.order,
+                    "page_break": group.page_break,
                     "answers": []
                 }
             groups_map[group.id]["answers"].append(

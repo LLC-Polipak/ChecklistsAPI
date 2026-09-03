@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     'drf_spectacular',
     'drf_spectacular_sidecar',
     'corsheaders',
+    'nested_admin',
     'apps.checklists',
     'apps.users',
 ]
