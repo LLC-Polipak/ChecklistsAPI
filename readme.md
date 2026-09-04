@@ -81,7 +81,7 @@ python manage.py runserver
 
 {
   "equipment_uid": "EQ-FORKLIFT-01",
-  "checklist_type": "INSPECTION",
+  "checklist_type": "HANDOVER",
   "user_uid": "USER-DRIVER-007",
   "answers": {
     "1": "В норме",
@@ -89,4 +89,3 @@ python manage.py runserver
     "3": "true"
   }
 }
-

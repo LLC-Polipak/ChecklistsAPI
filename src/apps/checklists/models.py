@@ -1,4 +1,15 @@
+"""Определение моделей базы данных для системы чек-листов."""
+
 from django.db import models
+
+from apps.checklists.constants import (
+    ChecklistTypes,
+    FieldTypes,
+    ShiftTypes,
+    SignatureRoles,
+)
+from apps.checklists.managers import ChecklistResultManager, TemplateManager
+from apps.checklists.querysets import ChecklistResultQuerySet, TemplateQuerySet
 
 
 class Template(models.Model):
@@ -8,11 +19,6 @@ class Template(models.Model):
     Определяет набор полей, которые необходимо заполнить
     при выполнении осмотра, приемки или сдачи оборудования.
     """
-    class ChecklistTypes(models.TextChoices):
-        """Возможные типы чек-листов."""
-        INSPECTION = 'INSPECTION', 'Осмотр'
-        ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
-        HANDOVER = 'HANDOVER', 'Сдача'
 
     equipment_uid = models.CharField('UID-оборудования', max_length=36, db_index=True)
     checklist_type = models.CharField(
@@ -21,6 +27,8 @@ class Template(models.Model):
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
     is_deprecated = models.BooleanField('Устаревший', default=False)
+
+    objects = TemplateManager.from_queryset(TemplateQuerySet)()
 
     class Meta:
         verbose_name = 'Шаблон чек-листа'
@@ -34,13 +42,17 @@ class Template(models.Model):
 class TemplateFieldGroup(models.Model):
     """
     Модель для группировки полей в шаблоне.
-    Включает в себя ссылку на шаблон, имя группы, а также порядок расположения в шаблоне.
+
+    Включает в себя ссылку на шаблон, имя группы, а также
+    порядок расположения в шаблоне.
     """
+
     template = models.ForeignKey(
         'Template', on_delete=models.CASCADE, related_name='groups'
     )
     name = models.CharField('Название группы', max_length=255)
     order = models.PositiveIntegerField('Порядок отображения группы', default=0)
+    page_break = models.BooleanField('Разрыв страницы', default=False)
 
     class Meta:
         ordering = ['order', 'id']
@@ -58,17 +70,11 @@ class TemplateFieldGroup(models.Model):
 
 class TemplateField(models.Model):
     """
-    Описывает одно поле анкеты, его тип и порядок отображения.
-    Для полей с типом ``CHOICE`` список допустимых значений
-    хранится в модели ``FieldChoice``.
+    Описание одного поля анкеты.
+
+    Определяет тип данных, обязательность и порядок отображения.
+    Для типа CHOICE список значений хранится в FieldChoice.
     """
-    class FieldTypes(models.TextChoices):
-        """Возможные типы полей, которые могут быть представлены в шаблоне."""
-        STRING = 'STRING', 'Строка'
-        INTEGER = 'INTEGER', 'Целое число'
-        CHOICE = 'CHOICE', 'Выбор из списка'
-        CHECKBOX = 'CHECKBOX', 'Чекбокс'
-        AUTO = 'AUTO', 'Автозаполняемое значение'
 
     group = models.ForeignKey(
         TemplateFieldGroup, on_delete=models.CASCADE, related_name='fields'
@@ -78,6 +84,10 @@ class TemplateField(models.Model):
     field_type = models.CharField('Тип поля', max_length=20, choices=FieldTypes)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
     is_required = models.BooleanField('Обязательное поле', default=True)
+    default_value = models.TextField('Значение по умолчанию', blank=True,
+                                     default='')
+
+    metadata = models.JSONField('Метаданные (Фронтенд)', default=dict, blank=True)
 
     class Meta:
         ordering = ['order', 'id']
@@ -92,14 +102,22 @@ class TemplateField(models.Model):
     def __str__(self):
         return f'{self.name}({self.get_field_type_display()})'
 
+    def save(self, *args, **kwargs):
+        """Перехватывает сохранение в БД для поддержания консистентности."""
+        super().save(*args, **kwargs)
+
+        if self.field_type != FieldTypes.CHOICE:
+            self.choices.all().delete()
+
 
 class FieldChoice(models.Model):
     """
-    Допустимое значение для поля типа ``CHOICE``.
+    Допустимое значение для поля типа CHOICE.
 
     Используется для формирования списка вариантов,
     доступных пользователю при заполнении чек-листа.
     """
+
     field = models.ForeignKey(
         TemplateField, on_delete=models.CASCADE, related_name='choices'
     )
@@ -119,15 +137,9 @@ class ChecklistResult(models.Model):
     """
     Заполненный экземпляр чек-листа.
 
-    Содержит информацию о шаблоне, оборудовании,
-    пользователе и времени заполнения.
-    Ответы на отдельные поля хранятся
-    в связанных объектах ``ChecklistAnswer``.
+    Содержит информацию о шаблоне, оборудовании, пользователе
+    и результатах проверки. Поддерживает версионирование через поле origin.
     """
-    class ShiftType(models.TextChoices):
-        """Возможные варианты смены."""
-        DAY = 'DAY', 'Дневная'
-        NIGHT = 'NIGHT', 'Ночная'
 
     template = models.ForeignKey(
         Template, on_delete=models.PROTECT, related_name='results'
@@ -135,12 +147,15 @@ class ChecklistResult(models.Model):
     user_uid = models.CharField('UID Пользователя', max_length=255, db_index=True)
 
     shift_number = models.CharField(
-        'Номер смены', max_length=10, choices=ShiftType, null=True
+        'Номер смены', max_length=10, choices=ShiftTypes, null=True
     )
     shift_time = models.DateTimeField('Время смены', null=True)
 
     is_completed = models.BooleanField('Завершена', default=False)
     is_deprecated = models.BooleanField('Устаревшая версия', default=False)
+    is_draft = models.BooleanField('Черновик', default=False)
+    has_violations = models.BooleanField('Есть отклонения', default=False,
+                                         db_index=True)
 
     origin = models.ForeignKey(
         'self',
@@ -153,6 +168,15 @@ class ChecklistResult(models.Model):
 
     created_at = models.DateTimeField('Дата заполнения', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
+    general_comment = models.TextField('Общий комментарий', null=True,
+                                       blank=True)
+
+    external_id = models.CharField(
+        'Внешний ID', max_length=255, null=True, db_index=True
+    )
+    source_service = models.CharField('Система источник', max_length=100, null=True)
+
+    objects = ChecklistResultManager.from_queryset(ChecklistResultQuerySet)()
 
     class Meta:
         verbose_name = 'Результат чек-листа'
@@ -163,15 +187,11 @@ class ChecklistResult(models.Model):
         return f'{status}Анкета {self.id} от {self.user_uid}'
 
     def check_and_complete(self):
-        """Проверяет наличие всех трех подписей и завершает анкету."""
-        required_roles = {
-            ChecklistSignature.Role.OPERATOR_OUT,
-            ChecklistSignature.Role.OPERATOR_IN,
-            ChecklistSignature.Role.MASTER,
-        }
-        current_roles = set(self.signatures.values_list('role', flat=True))
+        """Проверить наличие утверждающей подписи и завершить анкету."""
+        if self.is_draft:
+            return
 
-        if required_roles.issubset(current_roles):
+        if self.signatures.filter(role=SignatureRoles.APPROVER).exists():
             self.is_completed = True
             self.save(update_fields=['is_completed'])
 
@@ -180,9 +200,9 @@ class ChecklistAnswer(models.Model):
     """
     Ответ пользователя на отдельное поле чек-листа.
 
-    Связывает заполненный чек-лист с полем шаблона
-    и хранит введенное пользователем значение.
+    Связывает заполненный чек-лист с конкретным полем шаблона.
     """
+
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='answers'
     )
@@ -190,7 +210,9 @@ class ChecklistAnswer(models.Model):
         TemplateField, on_delete=models.PROTECT, related_name='answers'
     )
     value = models.TextField('Текст ответа')
-    comment = models.TextField('Замечание', null=True)
+    comment = models.TextField('Замечание', null=True, blank=True)
+    is_violation = models.BooleanField('Отклонение (Негативный ответ)',
+                                       default=False)
 
     class Meta:
         constraints = [
@@ -206,16 +228,12 @@ class ChecklistAnswer(models.Model):
 
 
 class ChecklistSignature(models.Model):
-    """Модель электронных подписей для анкеты."""
-    class Role(models.TextChoices):
-        OPERATOR_OUT = 'OPERATOR_OUT', 'Сдающий оператор'
-        OPERATOR_IN = 'OPERATOR_IN', 'Принимающий оператор'
-        MASTER = 'MASTER', 'Мастер смены'
+    """Модель электронной подписи для анкеты."""
 
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='signatures'
     )
-    role = models.CharField('Роль', max_length=20, choices=Role)
+    role = models.CharField('Роль', max_length=20, choices=SignatureRoles)
     user_uid = models.CharField('UID Подписанта', max_length=255)
     signed_at = models.DateTimeField('Дата подписи', auto_now_add=True)
 
@@ -227,3 +245,26 @@ class ChecklistSignature(models.Model):
         ]
         verbose_name = 'Подпись'
         verbose_name_plural = 'Подписи'
+
+
+class ChecklistAttachment(models.Model):
+    """
+    Медиафайлы, прикрепленные к результату чек-листа.
+
+    Хранит фотографии дефектов или сканы документов, загруженные пользователем.
+    """
+
+    result = models.ForeignKey(
+        ChecklistResult, on_delete=models.CASCADE, related_name='attachments'
+    )
+
+    file = models.FileField('Файл', upload_to='checklists/attachments/%Y/%m/')
+    uploaded_at = models.DateTimeField('Дата загрузки', auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Вложение'
+        verbose_name_plural = 'Вложения'
+        ordering = ['-uploaded_at']
+
+    def __str__(self):
+        return f'Вложение к анкете {self.result_id} ({self.file.name})'

@@ -1,78 +1,61 @@
-from django.db.models import Q
+"""Представления для API управления шаблонами и результатами чек-листов."""
+
+from django.http import HttpResponse
 from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework import status, viewsets
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from rest_framework import filters, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
+from apps.checklists.export_service import (
+    ChecklistExportDirector,
+    ExcelChecklistBuilder,
+    PdfChecklistBuilder,
+)
 from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
-from apps.checklists.models import ChecklistResult, ChecklistSignature, Template
+from apps.checklists.models import ChecklistResult, Template
 from apps.checklists.serializers import (
+    ChecklistAttachmentSerializer,
+    ChecklistAttachmentUploadSerializer,
     ChecklistResultCreateSerializer,
     ChecklistResultListSerializer,
+    ChecklistSignSerializer,
     TemplateSerializer,
 )
+from apps.checklists.services import ChecklistResultService, TemplateService
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
     """
-    Управление шаблонами чек-листов (CRUD).
+    API-контроллер для управления Шаблонами чек-листов (CRUD).
 
-    Обеспечивает создание, чтение, обновление и удаление структуры шаблонов.
+    Отвечает за маршрутизацию REST-запросов. Вся сложная бизнес-логика
+    делегирована слою сервисов (TemplateService).
     """
+
     queryset = Template.objects.prefetch_related('groups__fields__choices')
 
     serializer_class = TemplateSerializer
 
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = TemplateFilter
 
-    def destroy(self, request, *args, **kwargs):
-        """
-        Отвечает за удаление шаблона.
-
-        Returns:
-            HTTP 204: Удаление шаблон прошло успешно.
-            HTTP 400: Если на шаблон есть заполненный анкета.
-            HTTP 404: Шаблон с таким параметром не найден.
-        """
-        instance = self.get_object()
-
-        if instance.results.exists():
-            return Response(
-                {
-                    'error': 'Невозможно удалить шаблон, '
-                    'так как по нему уже есть заполненные анкеты.'
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return super().destroy(request, *args, **kwargs)
-
-    @action(detail=True, methods=['get'])
-    def history(self, request, pk=None):
-        """
-        Возвращает историю изменений для данного шаблона.
-        (Находит все устаревшие и текущую версию для этого оборудования и типа).
-        """
-        current_template = self.get_object()
-
-        history_queryset = (
-            Template.objects.filter(
-                equipment_uid=current_template.equipment_uid,
-                checklist_type=current_template.checklist_type,
-            )
-            .prefetch_related('fields__choices')
-            .order_by('-created_at')
-        )
-
-        serializer = self.get_serializer(history_queryset, many=True)
-
-        return Response(serializer.data)
+    search_fields = ['equipment_uid', 'groups__fields__name']
+    ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
 
     def get_queryset(self):
         """
-        При запросе всего списка шаблонов возвращает только актуальные.
-        По-прямому ID возвращает всю историю для данного шаблона.
+        Выполнить динамическую фильтрацию QuerySet в зависимости от типа запроса.
+
+        - При получении списка (action == 'list') скрывает устаревшие шаблоны.
+        - При прямом обращении предоставляет доступ ко всей базе.
         """
         qs = super().get_queryset()
         if self.action == 'list':
@@ -80,41 +63,69 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         return qs
 
-    @action(detail=False, methods=['get'])
-    def equipments(self, request):
+    def destroy(self, request, *args, **kwargs):
         """
-        Возвращает список уникальных UID оборудования из активных шаблонов.
-        Идеально для подсказок (autocomplete) на фронтенде.
-        """
-        uids = (self.get_queryset()
-                .values_list('equipment_uid', flat=True).distinct())
+        Обработать запрос на удаление шаблона.
 
-        return Response(list(uids))
+        Сервис проверит бизнес-правила и попытается восстановить предыдущую версию.
+        """
+        instance = self.get_object()
+
+        if instance.results.exists():
+            return Response({
+                                "error": "Невозможно удалить шаблон, по нему уже есть анкеты."},
+                            status=400)
+
+        TemplateService.delete_template(instance)
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
+        """
+        Получить хронологическую историю изменений (все версии) шаблона.
+
+        Эндпоинт: GET /api/v1/templates/{id}/history/.
+        """
+        current = self.get_object()
+        history_queryset = Template.objects.get_history(
+            current.equipment_uid, current.checklist_type
+        )
+        serializer = self.get_serializer(history_queryset, many=True)
+        return Response(serializer.data)
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
     """
-    Управление результатами заполнения чек-листов (История и Сохранение).
+    API-контроллер для управления Заполненными анкетами (Результатами).
 
-    - POST/PUT/PATCH: принимает плоский словарь ответов
-    и выполняет динамическую валидацию типов данных.
-    - GET: возвращает историю заполненных анкет.
-    - GET /history/ : возвращает полную историю всех изменений анкеты.
+    Обеспечивает создание черновиков, систему электронных подписей и
+    аудиторский след (Audit Trail) при редактировании анкет.
     """
-    queryset = (ChecklistResult.objects.select_related('template')
-    .prefetch_related(
-        'answers__field'
-    ))
 
-    filter_backends = [DjangoFilterBackend]
+    queryset = ChecklistResult.objects.select_related(
+        'template').prefetch_related(
+        'answers__field__group', 'signatures', 'attachments'
+    )
+
+    filter_backends = [
+        DjangoFilterBackend,
+        filters.SearchFilter,
+        filters.OrderingFilter,
+    ]
     filterset_class = ChecklistResultFilter
 
+    search_fields = [
+        'user_uid',
+        'template__equipment_uid',
+        'answers__value',
+        'answers__comment',
+    ]
+    ordering_fields = ['created_at', 'updated_at']
+    ordering = ['-created_at']
+
     def get_queryset(self):
-        """
-        При запросе полного списка анкет возвращает только актуальные,
-        отсекая устаревшие версии.
-        По запросе по-конкретному ID возвращает всю историю для данной анкеты.
-        """
+        """Скрыть исторические (устаревшие) версии анкет из общего списка выдачи."""
         qs = super().get_queryset()
 
         if self.action == 'list':
@@ -124,87 +135,190 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
     def get_serializer_class(self):
         """
-        Динамический выбор сериализатора в зависимости от HTTP-метода.
+        Определить класс сериализатора в зависимости от действия.
 
-        Returns:
-            ChecklistResultCreateSerializer: Для записи.
-            ChecklistResultListSerializer: Для чтения.
+        - Запись: использует строгий валидатор.
+        - Чтение: использует DTO с полной разверткой связей.
         """
         if self.action in {'create', 'update', 'partial_update'}:
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
 
+    def destroy(self, request, *args, **kwargs):
+        """Удалить актуальную версию анкеты и восстановить предыдущую."""
+        instance = self.get_object()
+        ChecklistResultService.delete_result(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         """
-        Возвращает историю изменений конкретной анкеты.
-        Включает оригинал и все его исправления, отсортированные от новых к старым.
+        Получить всю цепочку исправлений (версий) данной анкеты.
+
+        Эндпоинт: GET /api/v1/results/{id}/history/.
         """
-        current_result = self.get_object()
-
-        origin_id = current_result.origin_id or current_result.id
-
-        history_queryset = (
-            ChecklistResult.objects.filter(Q(id=origin_id)
-                                           | Q(origin_id=origin_id))
-            .select_related('template')
-            .prefetch_related('answers__field')
-            .order_by('-created_at')
-        )
-
+        current = self.get_object()
+        origin_id = current.origin_id or current.id
+        history_queryset = ChecklistResult.objects.get_history(origin_id)
         serializer = self.get_serializer(history_queryset, many=True)
-
         return Response(serializer.data)
 
+    @extend_schema(
+        summary='Подписать анкету',
+        description='Роль APPROVER закрывает анкету от изменений. '
+        'READER может подписывать даже закрытую анкету.',
+        request=ChecklistSignSerializer,
+        responses={
+            200: inline_serializer(
+                name='SignSuccessResponse',
+                fields={
+                    'message': serializers.CharField(),
+                    'is_completed': serializers.BooleanField(),
+                },
+            ),
+            400: inline_serializer(
+                name='SignErrorResponse', fields={'error': serializers.CharField()}
+            ),
+        },
+    )
     @action(detail=True, methods=['post'])
     def sign(self, request, pk=None):
         """
-        Эндпоинт для подписания анкеты.
-        Ожидает JSON: {"role": "OPERATOR_OUT", "user_uid": "USER-99"}.
+        Добавить или обновить электронную подпись к анкете.
+
+        Бизнес-логика защиты инкапсулирована в ChecklistResultService.
         """
         result = self.get_object()
-        role = request.data.get('role')
-        user_uid = request.data.get('user_uid')
 
-        if not role or not user_uid:
-            return Response(
-                {'error': 'Требуется передать role и user_uid'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        serializer = ChecklistSignSerializer(data=request.data,
+                                             context={'result': result})
+        serializer.is_valid(raise_exception=True)
 
-        if role not in ChecklistSignature.Role.values:
-            return Response(
-                {'error': 'Неверная роль подписанта'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if result.is_deprecated:
-            return Response(
-                {'error': 'Нельзя подписать устаревшую анкету'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        from django.utils.timezone import now
-
-        signature, created = ChecklistSignature.objects.get_or_create(
-            result=result, role=role, defaults={'user_uid': user_uid}
+        result, created = ChecklistResultService.sign_result(
+            result=result,
+            role=serializer.validated_data['role'],
+            user_uid=serializer.validated_data['user_uid']
         )
 
-        if not created:
-            signature.user_uid = user_uid
-            signature.signed_at = now()
-            signature.save(update_fields=['user_uid', 'signed_at'])
+        msg = "Анкета успешно подписана!" if created else "Подпись успешно обновлена!"
+        return Response({"message": msg, "is_completed": result.is_completed},
+                        status=200)
 
-        result.check_and_complete()
+    @extend_schema(
+        summary='Экспорт анкеты в Excel',
+        description='Генерирует Excel-файл со всеми ответами, комментариями и подписями.',
+        parameters=[
+            OpenApiParameter(name='document_code', required=False, type=str,
+                             description="Код документа"),
+            OpenApiParameter(name='machine_name', required=False, type=str,
+                             description="Человекочитаемое имя машины"),
+        ],
+        responses={200: OpenApiTypes.BINARY},
+    )
+    @action(detail=True, methods=['get'])
+    def export_excel(self, request, pk=None):
+        """
+        Сгенерировать и отдать Excel-файл анкеты для скачивания.
 
-        status_msg = (
-            'Анкета успешно подписана!' if created
-            else 'Подпись успешно обновлена!'
+        Эндпоинт: GET /api/v1/results/{id}/export_excel/.
+        """
+        result = self.get_object()
+
+        doc_code = request.query_params.get('document_code', 'ФЗ-Ж04-П1')
+        machine_name = request.query_params.get('machine_name',
+                                                result.template.equipment_uid)
+
+        builder = ExcelChecklistBuilder(
+            result,
+            doc_code,
+            machine_name
+        )
+        director = ChecklistExportDirector(builder)
+        excel_bytes = director.construct_document()
+
+        response = HttpResponse(excel_bytes,
+                                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+        safe_uid = str(machine_name).replace(' ', '_')
+        response[
+            'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.xlsx"'
+        return response
+
+    @extend_schema(
+        summary="Экспорт анкеты в PDF",
+        description="Генерирует PDF-файл печатного бланка анкеты.",
+        parameters=[
+            OpenApiParameter(name='document_code', required=False, type=str,
+                             description="Код документа"),
+            OpenApiParameter(name='machine_name', required=False, type=str,
+                             description="Человекочитаемое имя машины"),
+        ],
+        responses={
+            200: OpenApiTypes.BINARY
+        }
+    )
+    @action(detail=True, methods=['get'])
+    def export_pdf(self, request, pk=None):
+        """
+        Сгенерировать и отдать PDF-файл анкеты для скачивания.
+
+        Эндпоинт: GET /api/v1/results/{id}/export_pdf/.
+        """
+        result = self.get_object()
+
+        doc_code = request.query_params.get('document_code', 'ФЗ-Ж04-П1')
+        machine_name = request.query_params.get('machine_name',
+                                                result.template.equipment_uid)
+
+        builder = PdfChecklistBuilder(
+            result,
+            doc_code,
+            machine_name
+        )
+        director = ChecklistExportDirector(builder)
+        pdf_bytes = director.construct_document()
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+
+        safe_uid = str(machine_name).replace(' ', '_')
+        response[
+            'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.pdf"'
+        return response
+
+    @extend_schema(
+        summary='Прикрепить файл к анкете',
+        description='Загрузка фото/документов. Файл нужно передавать через form-data.',
+        request={
+            'multipart/form-data': {
+                'type': 'object',
+                'properties': {
+                    'file': {
+                        'type': 'string',
+                        'format': 'binary'
+                    }
+                },
+                'required': ['file']
+            }
+        },
+        responses={201: ChecklistAttachmentSerializer},
+    )
+    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def upload_attachment(self, request, pk=None):
+        """
+        Загрузить медиафайл (фото/документ) к анкете.
+
+        Проверяет статус анкеты в Сервисном слое перед сохранением.
+        """
+        serializer = ChecklistAttachmentUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        attachment = ChecklistResultService.add_attachment(
+            result_id=pk, file_obj=serializer.validated_data['file']
         )
 
         return Response(
-            {
-                'message': status_msg,
-                'is_completed': result.is_completed
-            }
+            ChecklistAttachmentSerializer(
+                attachment, context={'request': request}
+            ).data,
+            status=status.HTTP_201_CREATED,
         )

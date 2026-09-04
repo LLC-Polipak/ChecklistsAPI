@@ -1,3 +1,11 @@
+name: checklists
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:16.3-alpine
@@ -5,44 +13,49 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "54320:5432"
     volumes:
       - checklists_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'" ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    logging: *default-logging
 
   migrations:
-    build:
-      context: ../src
-      dockerfile: Dockerfile
+    image: polipak/checklists_backend:latest
     container_name: checklists-migrations
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     env_file:
       - .env
-    command: python manage.py migrate --noinput
+    command: >
+      sh -c "
+      python manage.py collectstatic --noinput &&
+      python manage.py migrate --noinput
+      "
+    logging: *default-logging
 
   backend:
-    build:
-      context: ../src
-      dockerfile: Dockerfile
+    image: polipak/checklists_backend:latest
     container_name: checklists-backend
     restart: unless-stopped
     volumes:
       - static_volume:/app/static/
       - media_volume:/app/media/
     command: >
-      sh -c "
-      python manage.py collectstatic --noinput &&
-      gunicorn config.wsgi:application --bind 0.0.0.0:8000
-      "
+      gunicorn config.wsgi:application 
+      --bind 0.0.0.0:8000
     depends_on:
       migrations:
         condition: service_completed_successfully
     env_file:
       - .env
+    logging: *default-logging
 
   nginx:
-    image: nginx:1.25
+    image: nginx:1.25-alpine
     container_name: checklists-nginx
     restart: unless-stopped
     ports:
@@ -53,6 +66,7 @@ services:
       - media_volume:/usr/share/nginx/html/media/
     depends_on:
       - backend
+    logging: *default-logging
 
 
 volumes:
