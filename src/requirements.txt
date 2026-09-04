@@ -17,6 +17,7 @@ djangorestframework==3.16.*
 
 # --- Documentation ---
 drf-spectacular==0.29.*
+drf-spectacular-sidecar==2025.10.*
 
 # --- Production ---
 django-cors-headers==4.9.*
