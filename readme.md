@@ -28,7 +28,7 @@
 
 1. Клонируйте репозиторий и перейдите в папку `infra`:
    ```bash
-   git clone https://github.com/gevorgdjan/ChecklistsAPI.git
+   git clone https://github.com/LLC-Polipak/ChecklistsAPI.git
    cd infra
    ```
 2. Создайте файл `.env` на основе `.env.example`. (файл должен лежать в папке `infra`)
@@ -43,7 +43,7 @@
 
 1. Клонируйте репозиторий и перейдите в папку `src`:
    ```
-   git clone https://github.com/gevorgdjan/ChecklistsAPI.git
+   git clone https://github.com/LLC-Polipak/ChecklistsAPI.git
    cd src
    ```
 2. Создайте файл `.env` на основе `.env.example`. (файл должен лежать в папке `src`)
