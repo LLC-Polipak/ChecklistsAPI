@@ -32,14 +32,6 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
         fields = ['value', 'order']
 
 
-class FieldMetadataSerializer(serializers.Serializer):
-    """Сериализатор для возможного представления данных, хранящихся в метадате поля."""
-
-    bool_true_label = serializers.CharField(allow_null=True, allow_blank=True)
-    bool_false_label = serializers.CharField(allow_null=True, allow_blank=True)
-    comment_label = serializers.CharField(allow_null=True, allow_blank=True)
-
-
 class TemplateFieldSerializer(serializers.ModelSerializer):
     """
     Сериализовать поле шаблона анкеты.
@@ -51,8 +43,6 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
     field_type_display = serializers.CharField(
         source='get_field_type_display', read_only=True
     )
-
-    metadata = FieldMetadataSerializer(read_only=True)
 
     class Meta:
         model = TemplateField
@@ -526,7 +516,9 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
         source='field.get_field_type_display', read_only=True
     )
 
-    metadata = FieldMetadataSerializer(source='field.metadata', read_only=True)
+    metadata = serializers.JSONField(
+        source='field.metadata', read_only=True
+    )
 
     class Meta:
         model = ChecklistAnswer
