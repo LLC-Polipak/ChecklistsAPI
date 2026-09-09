@@ -18,35 +18,21 @@ class TemplateManager(models.Manager):
         Returns:
             Объект Template со всей загруженной иерархией полей, либо None.
         """
-        return (
-            self.get_queryset()
-            .active()
-            .for_equipment(equipment_uid, checklist_type)
-            .with_full_hierarchy()
-            .first()
-        )
+        return (self.get_queryset().active()
+                .for_equipment(equipment_uid, checklist_type)
+                .with_full_hierarchy().first())
 
-    def deprecate_all(self, equipment_uid: str, checklist_type: str):
+    def deprecate_all(self, equipment_uid: str, checklist_type: str, exclude_id: int = None):
         """
         Мягко удалить (Soft Delete) все активные шаблоны указанного типа.
 
         Используется при создании новой версии шаблона для сохранения историчности.
         """
-        (
-            self.get_queryset()
-            .active()
-            .for_equipment(equipment_uid, checklist_type)
-            .update(is_deprecated=True)
-        )
-
-    def get_unique_equipments(self):
-        """Получить список уникальных идентификаторов оборудования."""
-        return list(
-            self.get_queryset()
-            .active()
-            .values_list('equipment_uid', flat=True)
-            .distinct()
-        )
+        qs = self.get_queryset().active().for_equipment(equipment_uid,
+                                                        checklist_type)
+        if exclude_id:
+            qs = qs.exclude(id=exclude_id)
+        qs.update(is_deprecated=True)
 
     def restore_latest_deprecated(self, equipment_uid: str, checklist_type: str):
         """
@@ -99,7 +85,8 @@ class ChecklistResultManager(models.Manager):
 
         Срабатывает, если текущая активная версия анкеты была удалена.
         """
-        active_exists = self.get_queryset().active().related_history(origin_id).exists()
+        active_exists = (self.get_queryset().active()
+                         .related_history(origin_id).exists())
 
         if not active_exists:
             latest = (

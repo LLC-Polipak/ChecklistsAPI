@@ -1,4 +1,5 @@
 """Сервисы для управления бизнес-логикой шаблонов и результатов чек-листов."""
+import datetime
 
 from django.db import transaction
 from django.utils.timezone import now
@@ -27,7 +28,7 @@ class TemplateService:
 
     @classmethod
     @transaction.atomic
-    def create_template(cls, validated_data: dict):
+    def create_template(cls, validated_data: dict) -> Template:
         """
         Создать новую версию шаблона.
 
@@ -37,20 +38,21 @@ class TemplateService:
         2. Иерархия (Группы -> Поля -> Варианты выбора) сохраняется атомарно.
         """
         groups_data = validated_data.pop('groups', [])
+        is_draft = validated_data.get('is_draft', False)
 
-        Template.objects.deprecate_all(
-            validated_data.get('equipment_uid'), validated_data.get('checklist_type')
-        )
+        if not is_draft:
+            Template.objects.deprecate_all(
+                validated_data.get('equipment_uid'),
+                validated_data.get('checklist_type')
+            )
 
         template = Template.objects.create(**validated_data)
-
         cls._save_hierarchy(template, groups_data)
-
         return template
 
     @classmethod
     @transaction.atomic
-    def update_template(cls, instance, validated_data: dict):
+    def update_template(cls, instance: Template, validated_data: dict) -> Template:
         """
         Полностью перезаписать иерархию полей существующего шаблона.
 
@@ -58,10 +60,25 @@ class TemplateService:
         так как это нарушит структуру исторических данных. Для изменения нужно
         создавать новую версию шаблона через метод create_template.
         """
+        if instance.results.exists():
+            raise ValidationError(
+                "Невозможно изменить шаблон, по нему уже есть анкеты.")
+
         groups_data = validated_data.pop('groups', None)
+        was_draft = instance.is_draft
 
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+
+        is_draft = instance.is_draft
+
+        if was_draft and not is_draft:
+            Template.objects.deprecate_all(
+                instance.equipment_uid,
+                instance.checklist_type,
+                exclude_id=instance.id
+            )
+
         instance.save()
 
         if groups_data is not None:
@@ -266,28 +283,63 @@ class ChecklistResultService:
 
     @classmethod
     def _check_violation(cls, field: TemplateField, value: str) -> bool:
-        """Анализирует ответ пользователя на основе правил из метаданных поля."""
+        """Анализировать ответ пользователя на предмет отклонений."""
         meta = field.metadata
         if not meta or value == "":
             return False
 
+        handlers = {
+            'CHECKBOX': cls._is_bool_violation,
+            'RADIO': cls._is_bool_violation,
+            'CHOICE': cls._is_choice_violation,
+            'NUMBER': cls._is_numeric_violation,
+            'DATE': cls._is_date_violation,
+            'AUTO_DATE': cls._is_date_violation,
+        }
+
+        handler = handlers.get(field.field_type)
+        if not handler:
+            return False
+
         try:
-            if field.field_type == 'CHECKBOX' and 'violation_on' in meta:
-                return str(value).lower() == str(meta['violation_on']).lower()
-
-            if field.field_type == 'CHOICE' and 'violation_choices' in meta:
-                return value in meta['violation_choices']
-
-            if field.field_type == 'NUMBER':
-                num_val = float(value)
-                if 'min_valid' in meta and num_val < float(
-                    meta['min_valid']):
-                    return True
-                if 'max_valid' in meta and num_val > float(
-                    meta['max_valid']):
-                    return True
-
+            return handler(meta, value)
         except (ValueError, TypeError):
-            pass
+            return False
 
+    @staticmethod
+    def _is_bool_violation(meta: dict, value: str) -> bool:
+        """Проверить отклонение для логических типов."""
+        if 'violation_on' in meta:
+            return str(value).lower() == str(meta['violation_on']).lower()
+        return False
+
+    @staticmethod
+    def _is_choice_violation(meta: dict, value: str) -> bool:
+        """Проверить отклонение для списков выбора."""
+        if 'violation_choices' in meta:
+            return value in meta['violation_choices']
+        return False
+
+    @staticmethod
+    def _is_numeric_violation(meta: dict, value: str) -> bool:
+        """Проверить отклонение для числовых значений."""
+        num_val = float(value)
+        if 'min_valid' in meta and num_val < float(meta['min_valid']):
+            return True
+        return bool('max_valid' in meta and num_val > float(meta['max_valid']))
+
+    @staticmethod
+    def _is_date_violation(meta: dict, value: str) -> bool:
+        """Проверить отклонение для дат."""
+        answer_date = datetime.date.fromisoformat(value)
+        today = datetime.date.today()
+        days_diff = (today - answer_date).days
+
+        if 'max_days_ago' in meta and days_diff > int(meta['max_days_ago']):
+            return True
+
+        if 'min_days_ahead' in meta:
+            days_ahead = -days_diff
+            if days_ahead < int(meta['min_days_ahead']):
+                return True
         return False

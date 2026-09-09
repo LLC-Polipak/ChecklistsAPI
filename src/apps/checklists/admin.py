@@ -53,19 +53,37 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
 
     list_display = (
         'id',
+        'name',
         'equipment_uid',
         'checklist_type',
-        'is_deprecated',
+        'get_is_draft',
+        'get_is_deprecated',
         'created_at',
         'updated_at'
     )
-    list_filter = ('checklist_type', 'is_deprecated')
-    search_fields = ('equipment_uid',)
+    list_filter = ('is_draft', 'checklist_type', 'is_deprecated')
+    search_fields = ('name', 'equipment_uid')
 
     inlines = [TemplateFieldGroupInline]
 
     readonly_fields = ('created_at', 'updated_at')
     ordering = ['is_deprecated', '-created_at']
+
+    @admin.display(description='Черновик', ordering='is_draft')
+    def get_is_draft(self, obj):
+        """Форматирует отображение статуса черновика шаблона."""
+        if obj.is_draft:
+            return format_html(
+                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
+        return "Нет"
+
+    @admin.display(description='Устаревший', ordering='is_deprecated')
+    def get_is_deprecated(self, obj):
+        """Форматирует отображение статуса неактуальности шаблона."""
+        if obj.is_deprecated:
+            return format_html(
+                '<span style="color: #9CA3AF;">Да (В архиве)</span>')
+        return "Нет"
 
 
 class ChecklistSignatureInline(admin.TabularInline):
@@ -116,10 +134,10 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         'user_uid',
         'source_service',
         'shift_number',
-        'is_draft',
+        'get_is_draft',
         'is_completed',
-        'is_deprecated',
-        'has_violations',
+        'get_is_deprecated',
+        'get_has_violations',
         'created_at',
     )
     list_filter = (
@@ -166,7 +184,7 @@ class ChecklistResultAdmin(admin.ModelAdmin):
                 '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
         return "Нет (Чистовик)"
 
-    @admin.display(description='Устарела', ordering='is_deprecated')
+    @admin.display(description='Устаревший', ordering='is_deprecated')
     def get_is_deprecated(self, obj):
         """Метод для понятной простому человеку отрисовки неактуальности анкеты."""
         if obj.is_deprecated:

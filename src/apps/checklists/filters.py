@@ -39,7 +39,7 @@ class TemplateFilter(django_filters.FilterSet):
 
     class Meta:
         model = Template
-        fields = ['equipment_uid', 'checklist_type', 'is_deprecated']
+        fields = ['equipment_uid', 'checklist_type', 'is_deprecated', 'is_draft']
 
     def filter_end_of_day(self, queryset, name, value):
         """Превращает дату в конец дня: YYYY-MM-DD 23:59:59.999999."""

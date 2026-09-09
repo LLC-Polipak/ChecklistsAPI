@@ -13,7 +13,11 @@ class TemplateQuerySet(models.QuerySet):
 
     def active(self):
         """Вернуть только активные (не устаревшие) шаблоны."""
-        return self.filter(is_deprecated=False)
+        return self.filter(is_deprecated=False, is_draft=False)
+
+    def drafts(self):
+        """Возвращает только черновики."""
+        return self.filter(is_draft=True)
 
     def deprecated(self):
         """Вернуть только устаревшие (находящиеся в архиве) версии шаблонов."""

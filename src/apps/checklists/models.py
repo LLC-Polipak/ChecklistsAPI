@@ -20,12 +20,17 @@ class Template(models.Model):
     при выполнении осмотра, приемки или сдачи оборудования.
     """
 
+    name = models.CharField('Название шаблона', max_length=255,
+                            default='Без названия')
+
     equipment_uid = models.CharField('UID-оборудования', max_length=36, db_index=True)
     checklist_type = models.CharField(
         'Тип чек-листа', max_length=50, choices=ChecklistTypes
     )
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
+
+    is_draft = models.BooleanField('Черновик', default=False)
     is_deprecated = models.BooleanField('Устаревший', default=False)
 
     objects = TemplateManager.from_queryset(TemplateQuerySet)()
@@ -35,8 +40,8 @@ class Template(models.Model):
         verbose_name_plural = 'Шаблоны чек-листов'
 
     def __str__(self):
-        status = '[УСТАРЕЛ]' if self.is_deprecated else ''
-        return f'{status}{self.get_checklist_type_display()}({self.equipment_uid})'
+        status = "[УСТАРЕЛ] " if self.is_deprecated else ("[ЧЕРНОВИК] " if self.is_draft else "")
+        return f"{status}{self.name} ({self.equipment_uid})"
 
 
 class TemplateFieldGroup(models.Model):

@@ -186,19 +186,15 @@ class TemplateSerializer(serializers.ModelSerializer):
     has_results = serializers.SerializerMethodField()
 
     class Meta:
-        fields = [
-            'id',
-            'equipment_uid',
-            'checklist_type_display',
-            'checklist_type',
-            'created_at',
-            'updated_at',
-            'is_deprecated',
-            'has_results',
-            'groups',
-        ]
         model = Template
-        read_only_fields = ['id', 'created_at', 'updated_at', 'has_results']
+        fields = [
+            'id', 'name', 'equipment_uid', 'checklist_type',
+            'checklist_type_display',
+            'is_draft', 'is_deprecated', 'has_results', 'created_at',
+            'updated_at', 'groups'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'has_results',
+                            'is_deprecated']
 
     @extend_schema_field(serializers.BooleanField())
     def get_has_results(self, obj):
