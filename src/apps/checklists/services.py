@@ -5,7 +5,6 @@ from django.db import transaction
 from django.utils.timezone import now
 from rest_framework.exceptions import ValidationError
 
-from apps.checklists.constants import SignatureRoles
 from apps.checklists.models import (
     ChecklistAnswer,
     ChecklistAttachment,
@@ -145,7 +144,7 @@ class ChecklistResultService:
         result = ChecklistResult.objects.create(**validated_data)
 
         cls._save_answers(result, answers_data)
-        cls._upsert_signature(result, SignatureRoles.AUTHOR, result.user_uid)
+        cls._upsert_signature(result, "Составитель", result.user_uid)
 
         return result
 
@@ -185,7 +184,7 @@ class ChecklistResultService:
         return new_result
 
     @classmethod
-    def sign_result(cls, result: ChecklistResult, role: str, user_uid: str):
+    def sign_result(cls, result: ChecklistResult, role: str, user_uid: str, is_closing: bool = False):
         """
         Добавить электронную подпись к анкете.
 
@@ -196,8 +195,11 @@ class ChecklistResultService:
         4. Если подпись ставит Утверждающий, анкета переходит в статус Завершено.
         """
         signature, created = cls._upsert_signature(result, role, user_uid)
-        result.check_and_complete()
-        return result, created
+
+        # Если эта подпись является закрывающей (финальной)
+        if is_closing and not result.is_completed:
+            result.is_completed = True
+            result.save(update_fields=['is_completed'])
 
         return result, created
 
@@ -240,6 +242,25 @@ class ChecklistResultService:
         return ChecklistAttachment.objects.create(result=result, file=file_obj)
 
     @classmethod
+    def delete_attachment(cls, attachment: ChecklistAttachment):
+        """
+        Удалить файл из анкеты.
+
+        Бизнес-правила:
+        1. Запрещено удалять файл у завершенной анкеты.
+        2. Запрещено удалять файл у исторических версий анкеты.
+        """
+        if attachment.result.is_deprecated:
+            raise ValidationError("Нельзя удалять файлы из устаревшей анкеты.")
+        if attachment.result.is_completed:
+            raise ValidationError("Анкета закрыта, удаление файлов запрещено.")
+
+        if attachment.file:
+            attachment.file.delete(save=False)
+
+        attachment.delete()
+
+    @classmethod
     def _save_answers(cls, result: ChecklistResult, answers_data: list):
         """Выполнить сохранение ответов анкеты и проставить метки отклонений."""
         has_violations = False
@@ -273,12 +294,13 @@ class ChecklistResultService:
     def _upsert_signature(cls, result: ChecklistResult, role: str, user_uid: str):
         """Обновить или создать электронную подпись."""
         signature, created = ChecklistSignature.objects.get_or_create(
-            result=result, role=role, defaults={'user_uid': user_uid}
+            result=result, role=role, user_uid=user_uid
         )
+
         if not created:
-            signature.user_uid = user_uid
             signature.signed_at = now()
-            signature.save(update_fields=['user_uid', 'signed_at'])
+            signature.save(update_fields=['signed_at'])
+
         return signature, created
 
     @classmethod

@@ -77,13 +77,13 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
                 '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
         return "Нет"
 
-    @admin.display(description='Устаревший', ordering='is_deprecated')
+    @admin.display(description='Актуальность', ordering='is_deprecated')
     def get_is_deprecated(self, obj):
         """Форматирует отображение статуса неактуальности шаблона."""
         if obj.is_deprecated:
             return format_html(
-                '<span style="color: #9CA3AF;">Да (В архиве)</span>')
-        return "Нет"
+                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>')
+        return "Актуальный"
 
 
 class ChecklistSignatureInline(admin.TabularInline):
@@ -104,12 +104,21 @@ class ChecklistAnswerInline(admin.TabularInline):
 
     model = ChecklistAnswer
     extra = 0
-    readonly_fields = ('field', 'is_violation')
+    readonly_fields = ('field', 'get_is_violation', 'value', 'comment')
+    fields = ('field', 'value', 'comment', 'get_is_violation')
     can_delete = False
 
     def has_add_permission(self, request, obj=None):
         """Запретить ручное добавление ответов через админку."""
         return False
+
+    @admin.display(description='Отклонение')
+    def get_is_violation(self, obj):
+        """Форматирует отображение метки отклонений у поля ответа."""
+        if obj.is_violation:
+            return format_html(
+                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>')
+        return format_html('<span style="color: #16A34A;">Нет</span>')
 
 
 class ChecklistAttachmentInline(admin.TabularInline):
@@ -184,10 +193,10 @@ class ChecklistResultAdmin(admin.ModelAdmin):
                 '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
         return "Нет (Чистовик)"
 
-    @admin.display(description='Устаревший', ordering='is_deprecated')
+    @admin.display(description='Актуальность', ordering='is_deprecated')
     def get_is_deprecated(self, obj):
         """Метод для понятной простому человеку отрисовки неактуальности анкеты."""
         if obj.is_deprecated:
             return format_html(
-                '<span style="color: #9CA3AF;">Да (В архиве)</span>')
-        return "Нет"
+                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>')
+        return "Актуальный"

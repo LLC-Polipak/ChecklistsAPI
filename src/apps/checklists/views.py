@@ -2,13 +2,14 @@
 
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, inline_serializer
-from rest_framework import filters, serializers, status, viewsets
+from rest_framework import filters, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
 from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
-from apps.checklists.models import ChecklistResult, Template
+from apps.checklists.models import ChecklistAttachment, ChecklistResult, Template
 from apps.checklists.serializers import (
     ChecklistAttachmentSerializer,
     ChecklistAttachmentUploadSerializer,
@@ -56,6 +57,33 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    def create(self, request, *args, **kwargs):
+        """Создать новый шаблон и вернуть его данные."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        template = TemplateService.create_template(serializer.validated_data)
+
+        output_serializer = TemplateSerializer(template, context={'request': request})
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """Обновить существующий шаблон (поддерживает частичное обновление)."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        updated_template = TemplateService.update_template(
+            instance, serializer.validated_data
+        )
+
+        output_serializer = TemplateSerializer(
+            updated_template, context={'request': request}
+        )
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
     def destroy(self, request, *args, **kwargs):
         """
         Обработать запрос на удаление шаблона.
@@ -65,9 +93,10 @@ class TemplateViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
 
         if instance.results.exists():
-            return Response({
-                                "error": "Невозможно удалить шаблон, по нему уже есть анкеты."},
-                            status=400)
+            return Response(
+                {"error": "Невозможно удалить шаблон, по нему уже есть анкеты."},
+                status=400,
+            )
 
         TemplateService.delete_template(instance)
 
@@ -96,8 +125,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     аудиторский след (Audit Trail) при редактировании анкет.
     """
 
-    queryset = ChecklistResult.objects.select_related(
-        'template').prefetch_related(
+    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
         'answers__field__group', 'signatures', 'attachments'
     )
 
@@ -137,6 +165,35 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
 
+    def create(self, request, *args, **kwargs):
+        """Создать новую анкету (сохранить результаты заполнения)."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        result = ChecklistResultService.submit_result(serializer.validated_data)
+
+        output_serializer = ChecklistResultListSerializer(
+            result, context={'request': request}
+        )
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """Обновить ответы анкеты с созданием новой версии в базе данных."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        new_result = ChecklistResultService.update_result(
+            instance, serializer.validated_data
+        )
+
+        output_serializer = ChecklistResultListSerializer(
+            new_result, context={'request': request}
+        )
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
     def destroy(self, request, *args, **kwargs):
         """Удалить актуальную версию анкеты и восстановить предыдущую."""
         instance = self.get_object()
@@ -162,14 +219,14 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         'READER может подписывать даже закрытую анкету.',
         request=ChecklistSignSerializer,
         responses={
-            200: inline_serializer(
+            status.HTTP_200_OK: inline_serializer(
                 name='SignSuccessResponse',
                 fields={
                     'message': serializers.CharField(),
                     'is_completed': serializers.BooleanField(),
                 },
             ),
-            400: inline_serializer(
+            status.HTTP_400_BAD_REQUEST: inline_serializer(
                 name='SignErrorResponse', fields={'error': serializers.CharField()}
             ),
         },
@@ -183,54 +240,70 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         """
         result = self.get_object()
 
-        serializer = ChecklistSignSerializer(data=request.data,
-                                             context={'result': result})
+        serializer = ChecklistSignSerializer(
+            data=request.data, context={'result': result}
+        )
         serializer.is_valid(raise_exception=True)
 
         result, created = ChecklistResultService.sign_result(
             result=result,
             role=serializer.validated_data['role'],
-            user_uid=serializer.validated_data['user_uid']
+            user_uid=serializer.validated_data['user_uid'],
+            is_closing=serializer.validated_data['is_closing'],
         )
 
         msg = "Анкета успешно подписана!" if created else "Подпись успешно обновлена!"
-        return Response({"message": msg, "is_completed": result.is_completed},
-                        status=200)
+        return Response(
+            {"message": msg, "is_completed": result.is_completed},
+            status=status.HTTP_200_OK,
+        )
 
-    @extend_schema(
-        summary='Прикрепить файл к анкете',
-        description='Загрузка фото/документов. Файл нужно передавать через form-data.',
-        request={
-            'multipart/form-data': {
-                'type': 'object',
-                'properties': {
-                    'file': {
-                        'type': 'string',
-                        'format': 'binary'
-                    }
-                },
-                'required': ['file']
-            }
-        },
-        responses={201: ChecklistAttachmentSerializer},
-    )
-    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
-    def upload_attachment(self, request, pk=None):
-        """
-        Загрузить медиафайл (фото/документ) к анкете.
 
-        Проверяет статус анкеты в Сервисном слое перед сохранением.
-        """
-        serializer = ChecklistAttachmentUploadSerializer(data=request.data)
+class ChecklistAttachmentViewSet(
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """
+    Отдельный REST-эндпоинт для работы с файлами.
+
+    Позволяет загружать файлы, скачивать/просматривать и удалять их.
+    Не поддерживает PUT/PATCH (файлы нельзя "обновить", только удалить и залить новый).
+    """
+
+    queryset = ChecklistAttachment.objects.select_related('result')
+    parser_classes = [MultiPartParser, FormParser]
+
+    def get_serializer_class(self):
+        """Определить сериализатор в зависимости от типа запроса."""
+        if self.action == 'create':
+            return ChecklistAttachmentUploadSerializer
+        return ChecklistAttachmentSerializer
+
+    def create(self, request, *args, **kwargs):
+        """Загрузить новый прикрепленный файл к анкете."""
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         attachment = ChecklistResultService.add_attachment(
-            result_id=pk, file_obj=serializer.validated_data['file']
+            result_id=serializer.validated_data['result'],
+            file_obj=serializer.validated_data['file'],
         )
 
-        return Response(
-            ChecklistAttachmentSerializer(
-                attachment, context={'request': request}
-            ).data,
-            status=status.HTTP_201_CREATED,
+        output_serializer = ChecklistAttachmentSerializer(
+            attachment, context={'request': request}
         )
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        """Перехватить удаление и отдать в Сервис."""
+        attachment = self.get_object()
+
+        try:
+            ChecklistResultService.delete_attachment(attachment)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ValidationError as e:
+            return Response(
+                {"error": str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+            )

@@ -6,7 +6,6 @@ from apps.checklists.constants import (
     ChecklistTypes,
     FieldTypes,
     ShiftTypes,
-    SignatureRoles,
 )
 from apps.checklists.managers import ChecklistResultManager, TemplateManager
 from apps.checklists.querysets import ChecklistResultQuerySet, TemplateQuerySet
@@ -191,15 +190,6 @@ class ChecklistResult(models.Model):
         status = '[ИЗМЕНЕНА] ' if self.is_deprecated else ''
         return f'{status}Анкета {self.id} от {self.user_uid}'
 
-    def check_and_complete(self):
-        """Проверить наличие утверждающей подписи и завершить анкету."""
-        if self.is_draft:
-            return
-
-        if self.signatures.filter(role=SignatureRoles.APPROVER).exists():
-            self.is_completed = True
-            self.save(update_fields=['is_completed'])
-
 
 class ChecklistAnswer(models.Model):
     """
@@ -238,14 +228,15 @@ class ChecklistSignature(models.Model):
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='signatures'
     )
-    role = models.CharField('Роль', max_length=20, choices=SignatureRoles)
+    role = models.CharField('Роль', max_length=50)
     user_uid = models.CharField('UID Подписанта', max_length=255)
     signed_at = models.DateTimeField('Дата подписи', auto_now_add=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['result', 'role'], name='unique_role_signature_per_result'
+                fields=['result', 'role', 'user_uid'],
+                name='unique_signature_per_user_role'
             )
         ]
         verbose_name = 'Подпись'

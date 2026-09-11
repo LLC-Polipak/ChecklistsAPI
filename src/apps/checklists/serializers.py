@@ -6,7 +6,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from apps.checklists.constants import FieldTypes, ShiftTypes, SignatureRoles
+from apps.checklists.constants import FieldTypes, ShiftTypes
 from apps.checklists.models import (
     ChecklistAnswer,
     ChecklistAttachment,
@@ -17,7 +17,6 @@ from apps.checklists.models import (
     TemplateField,
     TemplateFieldGroup,
 )
-from apps.checklists.services import ChecklistResultService, TemplateService
 
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
@@ -72,8 +71,9 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
         default_value = attrs.get('default_value', '').strip()
 
         if field_type == FieldTypes.CHOICE and not choices:
-            raise serializers.ValidationError({
-                                                  "choices": "Для типа 'Выбор из списка' передайте хотя бы один вариант."})
+            raise serializers.ValidationError(
+                {"choices": "Для типа 'Выбор из списка' передайте хотя бы один вариант."}
+            )
         if field_type != FieldTypes.CHOICE:
             attrs['choices'] = []
 
@@ -87,43 +87,42 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             if validator_method:
                 error_msg = validator_method(default_value, choices=choices)
                 if error_msg:
-                    raise serializers.ValidationError(
-                        {"default_value": error_msg})
+                    raise serializers.ValidationError({"default_value": error_msg})
 
         attrs['default_value'] = default_value
         return attrs
 
     def _validate_default_integer(self, default_value, **kwargs):
-        """Вспомогательный метод для валидации значения по умолчанию для типа INTEGER."""
+        """Проверить значение по умолчанию для типа INTEGER."""
         if not default_value.lstrip('-').isdigit():
             return "Значение по умолчанию должно быть целым числом."
         return None
 
     def _validate_default_choice(self, default_value, choices, **kwargs):
-        """Вспомогательный метод для валидации значения по умолчанию для типа CHOICE."""
+        """Проверить значение по умолчанию для типа CHOICE."""
         valid_choices = [c.get('value') for c in choices]
         if default_value not in valid_choices:
             return f"Значение '{default_value}' недопустимо. Варианты: {valid_choices}"
         return None
 
     def _validate_default_checkbox(self, default_value, **kwargs):
-        """Вспомогательный метод для валидации значения по умолчанию для типа CHECKBOX."""
+        """Проверить значение по умолчанию для типа CHECKBOX."""
         return self._validate_boolean(default_value)
 
     def _validate_default_radio(self, default_value, **kwargs):
-        """Вспомогательный метод для валидации значения по умолчанию для типа RADIO."""
+        """Проверить значение по умолчанию для типа RADIO."""
         return self._validate_boolean(default_value)
 
     def _validate_default_date(self, default_value, **kwargs):
-        """Вспомогательный метод для валидации значения по умолчанию для типа DATE."""
+        """Проверить значение по умолчанию для типа DATE."""
         try:
-            import datetime
             datetime.date.fromisoformat(default_value)
         except ValueError:
             return "Дата по умолчанию должна быть в формате ГГГГ-ММ-ДД."
+        return None
 
     def _validate_boolean(self, default_value):
-        """Вспомошательный метод для валидации булевых значений."""
+        """Выполнить валидацию булевых значений."""
         if default_value.lower() not in ['true', 'false', '1', '0']:
             return "Для чекбокса значение по умолчанию должно быть 'true' или 'false'."
         return None
@@ -138,7 +137,7 @@ class AnswerItemSerializer(serializers.Serializer):
 
 
 class AnswerGroupSerializer(serializers.Serializer):
-    """Представить ответ с полями, входящие в эту группу."""
+    """Представить ответ с полями, входящими в эту группу."""
 
     group_id = serializers.IntegerField(help_text="ID группы полей из шаблона")
     answers = AnswerItemSerializer(many=True, allow_empty=True)
@@ -160,9 +159,7 @@ class TemplateFieldGroupSerializer(serializers.ModelSerializer):
 
         Вызывается автоматически при валидации поля 'fields'.
         """
-        orders = [
-            f.get('order') for f in value if f.get('order') is not None
-        ]
+        orders = [f.get('order') for f in value if f.get('order') is not None]
         if len(orders) != len(set(orders)):
             raise serializers.ValidationError(
                 'Порядковые номера полей в пределах одной группы '
@@ -191,10 +188,11 @@ class TemplateSerializer(serializers.ModelSerializer):
             'id', 'name', 'equipment_uid', 'checklist_type',
             'checklist_type_display',
             'is_draft', 'is_deprecated', 'has_results', 'created_at',
-            'updated_at', 'groups'
+            'updated_at', 'groups',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'has_results',
-                            'is_deprecated']
+        read_only_fields = [
+            'id', 'created_at', 'updated_at', 'has_results', 'is_deprecated'
+        ]
 
     @extend_schema_field(serializers.BooleanField())
     def get_has_results(self, obj):
@@ -214,32 +212,16 @@ class TemplateSerializer(serializers.ModelSerializer):
             )
 
         if self.instance:
-            if 'equipment_uid' in attrs and attrs[
-                'equipment_uid'] != self.instance.equipment_uid:
-                raise serializers.ValidationError({
-                    "equipment_uid": "Нельзя изменить UID оборудования "
-                                     "у существующего шаблона."
-                })
-            if 'checklist_type' in attrs and attrs[
-                'checklist_type'] != self.instance.checklist_type:
-                raise serializers.ValidationError({
-                    "checklist_type": "Нельзя изменить тип чек-листа "
-                                      "у существующего шаблона."
-                })
+            if 'equipment_uid' in attrs and attrs['equipment_uid'] != self.instance.equipment_uid:
+                raise serializers.ValidationError(
+                    {"equipment_uid": "Нельзя изменить UID оборудования у существующего шаблона."}
+                )
+            if 'checklist_type' in attrs and attrs['checklist_type'] != self.instance.checklist_type:
+                raise serializers.ValidationError(
+                    {"checklist_type": "Нельзя изменить тип чек-листа у существующего шаблона."}
+                )
 
         return attrs
-
-    def create(self, validated_data):
-        """
-        Передать провалидированные данные в Сервисный слой для создания.
-
-        Сервис атомарно сохранит иерархию и выполнит версионирование.
-        """
-        return TemplateService.create_template(validated_data)
-
-    def update(self, instance, validated_data):
-        """Передать данные в Сервисный слой для полного обновления (перезаписи)."""
-        return TemplateService.update_template(instance, validated_data)
 
     def validate_groups(self, value):
         """
@@ -247,9 +229,7 @@ class TemplateSerializer(serializers.ModelSerializer):
 
         Вызывается автоматически при валидации поля 'groups'.
         """
-        group_orders = [
-            g.get('order') for g in value if g.get('order') is not None
-        ]
+        group_orders = [g.get('order') for g in value if g.get('order') is not None]
         if len(group_orders) != len(set(group_orders)):
             raise serializers.ValidationError(
                 'Порядковые номера групп в шаблоне должны быть уникальными.'
@@ -259,7 +239,7 @@ class TemplateSerializer(serializers.ModelSerializer):
 
 class ChecklistResultCreateSerializer(serializers.Serializer):
     """
-    Обеспечить прием и динамическую валидацию заполненной анкеты.
+    Принять и провалидировать заполненную анкету.
 
     Выполняет проверку типов данных (Type Casting) и контроль обязательных полей.
     """
@@ -319,8 +299,10 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
                 field = template_fields[f_id]
                 if field.group_id != g_id:
-                    errors[
-                        f_id] = f"Поле '{field.name}' принадлежит группе ID {field.group_id}, а передано в группе ID {g_id}."
+                    errors[f_id] = (
+                        f"Поле '{field.name}' принадлежит группе ID {field.group_id}, "
+                        f"а передано в группе ID {g_id}."
+                    )
                     continue
 
                 answers_data[f_id] = ans_obj
@@ -340,26 +322,6 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         attrs['template'] = template
         attrs['validated_answers'] = validated_answers
         return attrs
-
-    def create(self, validated_data):
-        """
-        Делегировать сохранение новой анкеты слою Сервисов.
-
-        Сервис проставит подпись автора автоматически.
-        """
-        return ChecklistResultService.submit_result(validated_data)
-
-    def update(self, instance, validated_data):
-        """
-        Делегировать обновление анкеты слою Сервисов.
-
-        Реализует Аудиторский след через создание новой версии.
-        """
-        return ChecklistResultService.update_result(instance, validated_data)
-
-    def to_representation(self, instance):
-        """Вернуть расширенный JSON после успешного POST/PUT запроса."""
-        return ChecklistResultListSerializer(instance, context=self.context).data
 
     def _get_active_template(self, attrs):
         """
@@ -399,11 +361,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
             if not field.is_required and value == '':
                 validated_answers.append(
-                    {
-                        'field': field,
-                        'value': value,
-                        'comment': comment,
-                    }
+                    {'field': field, 'value': value, 'comment': comment}
                 )
                 continue
 
@@ -413,11 +371,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
             if value == '':
                 validated_answers.append(
-                    {
-                        'field': field,
-                        'value': value,
-                        'comment': comment,
-                    }
+                    {'field': field, 'value': value, 'comment': comment}
                 )
                 continue
 
@@ -426,11 +380,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 errors[f_id] = error_msg
             else:
                 validated_answers.append(
-                    {
-                        'field': field,
-                        'value': value,
-                        'comment': comment,
-                    }
+                    {'field': field, 'value': value, 'comment': comment}
                 )
 
         if errors:
@@ -453,48 +403,47 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         return None
 
     def _validate_integer(self, field, value):
-        """Метод для валидации поля с типом INTEGER."""
+        """Проверить поле с типом INTEGER."""
         if not value.lstrip('-').isdigit():
             return f"Поле '{field.name}' должно быть целым числом."
         return None
 
     def _validate_choice(self, field, value):
-        """Метод для валидации поля с типом CHOICE."""
+        """Проверить поле с типом CHOICE."""
         valid_choices = [c.value for c in field.choices.all()]
         if value not in valid_choices:
             return f"Значение '{value}' недопустимо. Варианты: {valid_choices}"
         return None
 
     def _validate_checkbox(self, field, value):
-        """Метод для валидации поля с типом CHECKBOX."""
+        """Проверить поле с типом CHECKBOX."""
         return self._validate_boolean(field, value)
 
     def _validate_radio(self, field, value):
-        """Метод для валидации поля с типом RADIO."""
+        """Проверить поле с типом RADIO."""
         return self._validate_boolean(field, value)
 
     def _validate_date(self, field, value):
-        """Метод для валидации поля с типом DATE."""
+        """Проверить поле с типом DATE."""
         try:
             datetime.date.fromisoformat(value)
         except ValueError:
             return f"Поле '{field.name}' должно быть корректной датой в формате ГГГГ-ММ-ДД."
+        return None
 
     def _validate_boolean(self, field, value):
-        """Вспомогательный метод для валидации булевых значений."""
+        """Выполнить проверку булевых значений."""
         if value.lower() not in ['true', 'false', '1', '0']:
             return f"Поле '{field.name}' должно быть логическим (true/false)."
         return None
 
     @staticmethod
-    def _check_missing_required_fields(template_fields, answers_data,
-                                       is_draft):
+    def _check_missing_required_fields(template_fields, answers_data, is_draft):
         """Проверить наличие всех обязательных полей в чистовике."""
         if is_draft:
             return
 
-        required_fields = {str(f.id) for f in template_fields.values() if
-                           f.is_required}
+        required_fields = {str(f.id) for f in template_fields.values() if f.is_required}
         missing = required_fields - set(answers_data.keys())
         if missing:
             raise ValidationError(
@@ -512,9 +461,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
         source='field.get_field_type_display', read_only=True
     )
 
-    metadata = serializers.JSONField(
-        source='field.metadata', read_only=True
-    )
+    metadata = serializers.JSONField(source='field.metadata', read_only=True)
 
     class Meta:
         model = ChecklistAnswer
@@ -526,7 +473,7 @@ class ChecklistAnswerSerializer(serializers.ModelSerializer):
             'metadata',
             'value',
             'comment',
-            'is_violation'
+            'is_violation',
         ]
 
 
@@ -543,14 +490,14 @@ class ChecklistAttachmentUploadSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChecklistAttachment
-        fields = ['file']
+        fields = ['result', 'file']
 
 
 class OutputGroupItemSerializer(serializers.Serializer):
     """
-    Вспомогательный сериализатор исключительно для Swagger.
+    Сформировать вспомогательную схему исключительно для Swagger.
 
-    Отвечает за отрисовку правильной схемы ответа для групп.
+    Отвечает за отрисовку правильной структуры ответа для групп.
     """
 
     group_id = serializers.IntegerField()
@@ -562,12 +509,17 @@ class OutputGroupItemSerializer(serializers.Serializer):
 class ChecklistSignSerializer(serializers.Serializer):
     """Валидировать запрос на постановку подписи в анкету."""
 
-    role = serializers.ChoiceField(
-        choices=SignatureRoles,
-        help_text='Роль подписанта (например, APPROVER).',
+    role = serializers.CharField(
+        max_length=50,
+        help_text='Название роли подписанта.'
     )
     user_uid = serializers.CharField(
         max_length=255, help_text='UID пользователя, ставящего подпись.'
+    )
+
+    is_closing = serializers.BooleanField(
+        default=False,
+        help_text='Если true, анкета будет переведена в статус Завершена (заблокирована для изменений).'
     )
 
     def validate(self, attrs):
@@ -577,7 +529,7 @@ class ChecklistSignSerializer(serializers.Serializer):
         Запрещает подпись черновиков, устаревших или закрытых анкет.
         """
         result = self.context.get('result')
-        role = attrs.get('role')
+        is_closing = attrs.get('is_closing')
 
         if result:
             if result.is_draft:
@@ -586,12 +538,22 @@ class ChecklistSignSerializer(serializers.Serializer):
                 )
             if result.is_deprecated:
                 raise ValidationError("Нельзя подписать устаревшую анкету.")
-            if result.is_completed and role != SignatureRoles.READER:
+            if result.is_completed and is_closing:
                 raise ValidationError(
-                    "Анкета закрыта. Разрешены только подписи Читателя."
+                    "Анкета уже закрыта. Можно только добавлять ознакомительные подписи без флага закрытия."
                 )
 
         return attrs
+
+
+class ChecklistSignatureSerializer(serializers.ModelSerializer):
+    """Представить электронную подпись анкеты."""
+
+    role_display = serializers.CharField(source='get_role_display', read_only=True)
+
+    class Meta:
+        model = ChecklistSignature
+        fields = ['role', 'role_display', 'user_uid', 'signed_at']
 
 
 class ChecklistResultListSerializer(serializers.ModelSerializer):
@@ -607,7 +569,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
         source='template.equipment_uid', read_only=True
     )
 
-    signatures = ChecklistSignSerializer(many=True, read_only=True)
+    signatures = ChecklistSignatureSerializer(many=True, read_only=True)
 
     groups = serializers.SerializerMethodField()
     attachments = ChecklistAttachmentSerializer(many=True, read_only=True)
@@ -638,7 +600,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(OutputGroupItemSerializer(many=True))
     def get_groups(self, obj):
-        """Группирует плоский список ответов по их группам из шаблона."""
+        """Сгруппировать плоский список ответов по их группам из шаблона."""
         groups_map = {}
         for ans in obj.answers.all():
             group = ans.field.group
@@ -651,7 +613,8 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
                     "answers": []
                 }
             groups_map[group.id]["answers"].append(
-                ChecklistAnswerSerializer(ans).data)
+                ChecklistAnswerSerializer(ans).data
+            )
 
         sorted_groups = sorted(groups_map.values(), key=lambda x: x['order'])
 
@@ -659,13 +622,3 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             g.pop('order', None)
 
         return sorted_groups
-
-
-class ChecklistSignatureSerializer(serializers.ModelSerializer):
-    """Представить электронную подпись анкеты."""
-
-    role_display = serializers.CharField(source='get_role_display', read_only=True)
-
-    class Meta:
-        model = ChecklistSignature
-        fields = ['role', 'role_display', 'user_uid', 'signed_at']
