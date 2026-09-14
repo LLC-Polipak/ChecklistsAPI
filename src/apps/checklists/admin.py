@@ -83,7 +83,7 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
         if obj.is_deprecated:
             return format_html(
                 '<span style="color: #9CA3AF;">Устарел (В архиве)</span>')
-        return "Актуальный"
+        return format_html('<span style="color: #16A34A;">Актуальный</span>')
 
 
 class ChecklistSignatureInline(admin.TabularInline):
@@ -199,4 +199,4 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         if obj.is_deprecated:
             return format_html(
                 '<span style="color: #9CA3AF;">Устарел (В архиве)</span>')
-        return "Актуальный"
+        return format_html('<span style="color: #16A34A;">Актуальный</span>')

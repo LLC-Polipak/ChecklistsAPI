@@ -281,6 +281,28 @@ class ChecklistAttachmentViewSet(
             return ChecklistAttachmentUploadSerializer
         return ChecklistAttachmentSerializer
 
+    @extend_schema(
+        summary="Загрузить прикрепленный файл",
+        description="Загрузка фото/документов к анкете. Обязательно используйте multipart/form-data.",
+        request={
+            'multipart/form-data': {
+                'type': 'object',
+                'properties': {
+                    'result': {
+                        'type': 'integer',
+                        'description': 'ID заполненной анкеты'
+                    },
+                    'file': {
+                        'type': 'string',
+                        'format': 'binary',
+                        'description': 'Сам файл'
+                    }
+                },
+                'required': ['result', 'file']
+            }
+        },
+        responses={status.HTTP_201_CREATED: ChecklistAttachmentSerializer}
+    )
     def create(self, request, *args, **kwargs):
         """Загрузить новый прикрепленный файл к анкете."""
         serializer = self.get_serializer(data=request.data)
