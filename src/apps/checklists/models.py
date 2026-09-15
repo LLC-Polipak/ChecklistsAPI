@@ -104,7 +104,7 @@ class TemplateField(models.Model):
         verbose_name_plural = 'Поля шаблонов'
 
     def __str__(self):
-        return f'{self.name}({self.get_field_type_display()})'
+        return f'{self.name} ({self.get_field_type_display()})'
 
     def save(self, *args, **kwargs):
         """Перехватывает сохранение в БД для поддержания консистентности."""

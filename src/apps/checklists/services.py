@@ -118,6 +118,54 @@ class TemplateService:
                         [FieldChoice(field=field, **c) for c in choices_data]
                     )
 
+    @classmethod
+    @transaction.atomic
+    def clone_template(cls, instance: Template,
+                       new_equipment_uid: str) -> Template:
+        """
+        Бизнес-логика клонирования шаблона.
+
+        Выполняет глубокое копирование (Deep Copy) всех групп, полей и вариантов.
+        Клон всегда создается в статусе "Черновик" для безопасной проверки администратором.
+        """
+        if instance.equipment_uid == new_equipment_uid:
+            raise ValidationError(
+                "Новый UID оборудования должен отличаться от оригинального.")
+
+        new_template = Template.objects.create(
+            name=f"{instance.name} (Копия)",
+            equipment_uid=new_equipment_uid,
+            checklist_type=instance.checklist_type,
+            is_draft=False,
+            is_deprecated=False
+        )
+
+        for old_group in instance.groups.all():
+            old_fields = list(
+                old_group.fields.all())
+
+            old_group.pk = None
+            old_group.template = new_template
+            old_group.save()
+
+            for old_field in old_fields:
+                old_choices = list(
+                    old_field.choices.all())
+
+                old_field.pk = None
+                old_field.group = old_group
+                old_field.save()
+
+                if old_choices:
+                    new_choices = [
+                        FieldChoice(field=old_field, value=c.value,
+                                    order=c.order)
+                        for c in old_choices
+                    ]
+                    FieldChoice.objects.bulk_create(new_choices)
+
+        return new_template
+
 
 class ChecklistResultService:
     """
@@ -217,7 +265,7 @@ class ChecklistResultService:
         ChecklistResult.objects.restore_latest_deprecated(origin_id)
 
     @classmethod
-    def add_attachment(cls, result_id: int, file_obj) -> ChecklistAttachment:
+    def add_attachment(cls, result: ChecklistResult, file_obj) -> ChecklistAttachment:
         """
         Прикрепить файл к анкете.
 
@@ -232,8 +280,6 @@ class ChecklistResultService:
         Returns:
             ChecklistAttachment: Созданный объект вложения.
         """
-        result = ChecklistResult.objects.get(id=result_id)
-
         if result.is_deprecated:
             raise ValidationError('Нельзя добавлять файлы к устаревшей анкете.')
         if result.is_completed:

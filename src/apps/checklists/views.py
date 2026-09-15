@@ -1,6 +1,9 @@
 """Представления для API управления шаблонами и результатами чек-листов."""
+import os
 
+from django.http import FileResponse
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema, inline_serializer
 from rest_framework import filters, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -16,6 +19,7 @@ from apps.checklists.serializers import (
     ChecklistResultCreateSerializer,
     ChecklistResultListSerializer,
     ChecklistSignSerializer,
+    TemplateCloneSerializer,
     TemplateSerializer,
 )
 from apps.checklists.services import ChecklistResultService, TemplateService
@@ -115,6 +119,36 @@ class TemplateViewSet(viewsets.ModelViewSet):
         )
         serializer = self.get_serializer(history_queryset, many=True)
         return Response(serializer.data)
+
+    @extend_schema(
+        summary="Клонировать шаблон",
+        description="Создает полную копию шаблона (включая все группы, поля и варианты выбора) для другого оборудования. Клон создается в статусе Черновика.",
+        request=TemplateCloneSerializer,
+        responses={status.HTTP_201_CREATED: TemplateSerializer}
+    )
+    @action(detail=True, methods=['post'])
+    def clone(self, request, pk=None):
+        """
+        Клонировать существующий шаблон для новой машины.
+
+        Эндпоинт: GET /api/v1/templates/{id}/clone/.
+        """
+        original_template = self.get_object()
+
+        serializer = TemplateCloneSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_uid = serializer.validated_data['equipment_uid']
+
+        try:
+            new_template = TemplateService.clone_template(original_template,
+                                                          new_equipment_uid=new_uid)
+        except ValidationError as e:
+            return Response({"error": str(e.detail[0])},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        response_serializer = self.get_serializer(new_template)
+        return Response(response_serializer.data,
+                        status=status.HTTP_201_CREATED)
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -309,7 +343,7 @@ class ChecklistAttachmentViewSet(
         serializer.is_valid(raise_exception=True)
 
         attachment = ChecklistResultService.add_attachment(
-            result_id=serializer.validated_data['result'],
+            result=serializer.validated_data['result'],
             file_obj=serializer.validated_data['file'],
         )
 
@@ -329,3 +363,29 @@ class ChecklistAttachmentViewSet(
             return Response(
                 {"error": str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
             )
+
+    @extend_schema(
+        summary="Принудительное скачивание файла",
+        description="Отдает файл в виде бинарного потока с заголовком attachment (заставляет браузер скачать файл, а не открыть его).",
+        responses={status.HTTP_200_OK: OpenApiTypes.BINARY}
+    )
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """
+        Эндпоинт для скачивания конкретного вложения по его ID.
+
+        Эндпоинт: GET /api/v1/attachments/{id}/download/.
+        """
+        attachment = self.get_object()
+
+        if not attachment.file:
+            return Response({"error": "Физ. файл не найден на сервере."},
+                            status=status.HTTP_404_NOT_FOUND)
+
+        response = FileResponse(attachment.file.open('rb'))
+
+        filename = os.path.basename(attachment.file.name)
+
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response

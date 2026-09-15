@@ -622,3 +622,12 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             g.pop('order', None)
 
         return sorted_groups
+
+
+class TemplateCloneSerializer(serializers.Serializer):
+    """Сериализатор для валидации запроса на клонирование шаблона."""
+
+    equipment_uid = serializers.CharField(
+        max_length=255,
+        help_text="UID нового оборудования, для которого создается копия"
+    )
