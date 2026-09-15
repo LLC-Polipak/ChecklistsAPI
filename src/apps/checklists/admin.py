@@ -1,4 +1,5 @@
 """Конфигурация административной панели для управления шаблонами и результатами."""
+
 import nested_admin
 from django.contrib import admin
 from django.utils.html import format_html
@@ -28,14 +29,7 @@ class TemplateFieldInline(nested_admin.NestedTabularInline):
 
     model = TemplateField
     extra = 0
-    fields = (
-        'name',
-        'field_type',
-        'is_required',
-        'order',
-        'default_value',
-        'metadata'
-    )
+    fields = ('name', 'field_type', 'is_required', 'order', 'default_value', 'metadata')
     inlines = [FieldChoiceInline]
 
 
@@ -53,19 +47,47 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
 
     list_display = (
         'id',
+        'name',
         'equipment_uid',
+        'checklist_type',
+        'get_is_draft',
+        'get_is_deprecated',
+        'created_at',
+        'updated_at',
+    )
+    list_filter = (
+        'is_draft',
         'checklist_type',
         'is_deprecated',
         'created_at',
-        'updated_at'
+        'updated_at',
     )
-    list_filter = ('checklist_type', 'is_deprecated')
-    search_fields = ('equipment_uid',)
+    search_fields = ('name', 'equipment_uid')
 
     inlines = [TemplateFieldGroupInline]
 
     readonly_fields = ('created_at', 'updated_at')
     ordering = ['is_deprecated', '-created_at']
+
+    date_hierarchy = 'created_at'
+
+    @admin.display(description='Черновик', ordering='is_draft')
+    def get_is_draft(self, obj):
+        """Форматирует отображение статуса черновика шаблона."""
+        if obj.is_draft:
+            return format_html(
+                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>'
+            )
+        return 'Нет'
+
+    @admin.display(description='Актуальность', ordering='is_deprecated')
+    def get_is_deprecated(self, obj):
+        """Форматирует отображение статуса неактуальности шаблона."""
+        if obj.is_deprecated:
+            return format_html(
+                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>'
+            )
+        return format_html('<span style="color: #16A34A;">Актуальный</span>')
 
 
 class ChecklistSignatureInline(admin.TabularInline):
@@ -86,12 +108,22 @@ class ChecklistAnswerInline(admin.TabularInline):
 
     model = ChecklistAnswer
     extra = 0
-    readonly_fields = ('field', 'is_violation')
+    readonly_fields = ('field', 'get_is_violation', 'value', 'comment')
+    fields = ('field', 'value', 'comment', 'get_is_violation')
     can_delete = False
 
     def has_add_permission(self, request, obj=None):
         """Запретить ручное добавление ответов через админку."""
         return False
+
+    @admin.display(description='Отклонение')
+    def get_is_violation(self, obj):
+        """Форматирует отображение метки отклонений у поля ответа."""
+        if obj.is_violation:
+            return format_html(
+                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>'
+            )
+        return format_html('<span style="color: #16A34A;">Нет</span>')
 
 
 class ChecklistAttachmentInline(admin.TabularInline):
@@ -116,20 +148,22 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         'user_uid',
         'source_service',
         'shift_number',
-        'is_draft',
+        'get_is_draft',
         'is_completed',
-        'is_deprecated',
-        'has_violations',
+        'get_is_deprecated',
+        'get_has_violations',
         'created_at',
     )
     list_filter = (
-        'has_violations',
         'is_draft',
         'is_completed',
+        'has_violations',
         'is_deprecated',
         'source_service',
         'shift_number',
         'template__checklist_type',
+        'created_at',
+        'updated_at',
     )
     search_fields = (
         'user_uid',
@@ -139,11 +173,17 @@ class ChecklistResultAdmin(admin.ModelAdmin):
     )
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('template', 'origin')
-    inlines = [ChecklistSignatureInline, ChecklistAnswerInline, ChecklistAttachmentInline]
+    inlines = [
+        ChecklistSignatureInline,
+        ChecklistAnswerInline,
+        ChecklistAttachmentInline,
+    ]
 
     list_select_related = ('template',)
 
     ordering = ['is_deprecated', '-created_at']
+
+    date_hierarchy = 'created_at'
 
     @admin.display(description='Оборудование', ordering='template__equipment_uid')
     def get_equipment(self, obj):
@@ -155,7 +195,8 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         """Метод для понятной простому человеку отрисовки отклонений в анкете."""
         if obj.has_violations:
             return format_html(
-                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>')
+                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>'
+            )
         return format_html('<span style="color: #16A34A;">Нет</span>')
 
     @admin.display(description='Черновик', ordering='is_draft')
@@ -163,13 +204,15 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         """Метод для понятной простому человеку отрисовки статуса черновика анкеты."""
         if obj.is_draft:
             return format_html(
-                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
-        return "Нет (Чистовик)"
+                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>'
+            )
+        return 'Нет (Чистовик)'
 
-    @admin.display(description='Устарела', ordering='is_deprecated')
+    @admin.display(description='Актуальность', ordering='is_deprecated')
     def get_is_deprecated(self, obj):
         """Метод для понятной простому человеку отрисовки неактуальности анкеты."""
         if obj.is_deprecated:
             return format_html(
-                '<span style="color: #9CA3AF;">Да (В архиве)</span>')
-        return "Нет"
+                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>'
+            )
+        return format_html('<span style="color: #16A34A;">Актуальный</span>')

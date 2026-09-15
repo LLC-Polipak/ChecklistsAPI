@@ -6,7 +6,6 @@ from apps.checklists.constants import (
     ChecklistTypes,
     FieldTypes,
     ShiftTypes,
-    SignatureRoles,
 )
 from apps.checklists.managers import ChecklistResultManager, TemplateManager
 from apps.checklists.querysets import ChecklistResultQuerySet, TemplateQuerySet
@@ -20,12 +19,16 @@ class Template(models.Model):
     при выполнении осмотра, приемки или сдачи оборудования.
     """
 
+    name = models.CharField('Название шаблона', max_length=255, default='Без названия')
+
     equipment_uid = models.CharField('UID-оборудования', max_length=36, db_index=True)
     checklist_type = models.CharField(
         'Тип чек-листа', max_length=50, choices=ChecklistTypes
     )
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
+
+    is_draft = models.BooleanField('Черновик', default=False)
     is_deprecated = models.BooleanField('Устаревший', default=False)
 
     objects = TemplateManager.from_queryset(TemplateQuerySet)()
@@ -35,8 +38,12 @@ class Template(models.Model):
         verbose_name_plural = 'Шаблоны чек-листов'
 
     def __str__(self):
-        status = '[УСТАРЕЛ]' if self.is_deprecated else ''
-        return f'{status}{self.get_checklist_type_display()}({self.equipment_uid})'
+        status = (
+            '[УСТАРЕЛ] '
+            if self.is_deprecated
+            else ('[ЧЕРНОВИК] ' if self.is_draft else '')
+        )
+        return f'{status}{self.name} ({self.equipment_uid})'
 
 
 class TemplateFieldGroup(models.Model):
@@ -84,8 +91,7 @@ class TemplateField(models.Model):
     field_type = models.CharField('Тип поля', max_length=20, choices=FieldTypes)
     order = models.PositiveIntegerField('Порядок отображения', default=0)
     is_required = models.BooleanField('Обязательное поле', default=True)
-    default_value = models.TextField('Значение по умолчанию', blank=True,
-                                     default='')
+    default_value = models.TextField('Значение по умолчанию', blank=True, default='')
 
     metadata = models.JSONField('Метаданные (Фронтенд)', default=dict, blank=True)
 
@@ -100,7 +106,7 @@ class TemplateField(models.Model):
         verbose_name_plural = 'Поля шаблонов'
 
     def __str__(self):
-        return f'{self.name}({self.get_field_type_display()})'
+        return f'{self.name} ({self.get_field_type_display()})'
 
     def save(self, *args, **kwargs):
         """Перехватывает сохранение в БД для поддержания консистентности."""
@@ -154,8 +160,9 @@ class ChecklistResult(models.Model):
     is_completed = models.BooleanField('Завершена', default=False)
     is_deprecated = models.BooleanField('Устаревшая версия', default=False)
     is_draft = models.BooleanField('Черновик', default=False)
-    has_violations = models.BooleanField('Есть отклонения', default=False,
-                                         db_index=True)
+    has_violations = models.BooleanField(
+        'Есть отклонения', default=False, db_index=True
+    )
 
     origin = models.ForeignKey(
         'self',
@@ -168,8 +175,7 @@ class ChecklistResult(models.Model):
 
     created_at = models.DateTimeField('Дата заполнения', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
-    general_comment = models.TextField('Общий комментарий', null=True,
-                                       blank=True)
+    general_comment = models.TextField('Общий комментарий', null=True, blank=True)
 
     external_id = models.CharField(
         'Внешний ID', max_length=255, null=True, db_index=True
@@ -185,15 +191,6 @@ class ChecklistResult(models.Model):
     def __str__(self):
         status = '[ИЗМЕНЕНА] ' if self.is_deprecated else ''
         return f'{status}Анкета {self.id} от {self.user_uid}'
-
-    def check_and_complete(self):
-        """Проверить наличие утверждающей подписи и завершить анкету."""
-        if self.is_draft:
-            return
-
-        if self.signatures.filter(role=SignatureRoles.APPROVER).exists():
-            self.is_completed = True
-            self.save(update_fields=['is_completed'])
 
 
 class ChecklistAnswer(models.Model):
@@ -211,8 +208,7 @@ class ChecklistAnswer(models.Model):
     )
     value = models.TextField('Текст ответа')
     comment = models.TextField('Замечание', null=True, blank=True)
-    is_violation = models.BooleanField('Отклонение (Негативный ответ)',
-                                       default=False)
+    is_violation = models.BooleanField('Отклонение (Негативный ответ)', default=False)
 
     class Meta:
         constraints = [
@@ -233,14 +229,15 @@ class ChecklistSignature(models.Model):
     result = models.ForeignKey(
         ChecklistResult, on_delete=models.CASCADE, related_name='signatures'
     )
-    role = models.CharField('Роль', max_length=20, choices=SignatureRoles)
+    role = models.CharField('Роль', max_length=50)
     user_uid = models.CharField('UID Подписанта', max_length=255)
     signed_at = models.DateTimeField('Дата подписи', auto_now_add=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=['result', 'role'], name='unique_role_signature_per_result'
+                fields=['result', 'role', 'user_uid'],
+                name='unique_signature_per_user_role',
             )
         ]
         verbose_name = 'Подпись'

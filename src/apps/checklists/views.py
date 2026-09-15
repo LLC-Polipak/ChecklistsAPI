@@ -1,27 +1,26 @@
 """Представления для API управления шаблонами и результатами чек-листов."""
 
-from django.http import HttpResponse
+import os
+
+from django.http import FileResponse
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
-from rest_framework import filters, serializers, status, viewsets
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import filters, mixins, serializers, status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 
-from apps.checklists.export_service import (
-    ChecklistExportDirector,
-    ExcelChecklistBuilder,
-    PdfChecklistBuilder,
-)
 from apps.checklists.filters import ChecklistResultFilter, TemplateFilter
-from apps.checklists.models import ChecklistResult, Template
+from apps.checklists.models import ChecklistAttachment, ChecklistResult, Template
 from apps.checklists.serializers import (
     ChecklistAttachmentSerializer,
     ChecklistAttachmentUploadSerializer,
     ChecklistResultCreateSerializer,
     ChecklistResultListSerializer,
     ChecklistSignSerializer,
+    TemplateCloneSerializer,
     TemplateSerializer,
 )
 from apps.checklists.services import ChecklistResultService, TemplateService
@@ -63,6 +62,33 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         return qs
 
+    def create(self, request, *args, **kwargs):
+        """Создать новый шаблон и вернуть его данные."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        template = TemplateService.create_template(serializer.validated_data)
+
+        output_serializer = TemplateSerializer(template, context={'request': request})
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """Обновить существующий шаблон (поддерживает частичное обновление)."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        updated_template = TemplateService.update_template(
+            instance, serializer.validated_data
+        )
+
+        output_serializer = TemplateSerializer(
+            updated_template, context={'request': request}
+        )
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
     def destroy(self, request, *args, **kwargs):
         """
         Обработать запрос на удаление шаблона.
@@ -72,9 +98,10 @@ class TemplateViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
 
         if instance.results.exists():
-            return Response({
-                                "error": "Невозможно удалить шаблон, по нему уже есть анкеты."},
-                            status=400)
+            return Response(
+                {'error': 'Невозможно удалить шаблон, по нему уже есть анкеты.'},
+                status=400,
+            )
 
         TemplateService.delete_template(instance)
 
@@ -94,6 +121,37 @@ class TemplateViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(history_queryset, many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary='Клонировать шаблон',
+        description='Создает полную копию шаблона (включая все группы, поля и варианты выбора) для другого оборудования. Клон создается в статусе Черновика.',
+        request=TemplateCloneSerializer,
+        responses={status.HTTP_201_CREATED: TemplateSerializer},
+    )
+    @action(detail=True, methods=['post'])
+    def clone(self, request, pk=None):
+        """
+        Клонировать существующий шаблон для новой машины.
+
+        Эндпоинт: GET /api/v1/templates/{id}/clone/.
+        """
+        original_template = self.get_object()
+
+        serializer = TemplateCloneSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        new_uid = serializer.validated_data['equipment_uid']
+
+        try:
+            new_template = TemplateService.clone_template(
+                original_template, new_equipment_uid=new_uid
+            )
+        except ValidationError as e:
+            return Response(
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        response_serializer = self.get_serializer(new_template)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
+
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
     """
@@ -103,8 +161,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     аудиторский след (Audit Trail) при редактировании анкет.
     """
 
-    queryset = ChecklistResult.objects.select_related(
-        'template').prefetch_related(
+    queryset = ChecklistResult.objects.select_related('template').prefetch_related(
         'answers__field__group', 'signatures', 'attachments'
     )
 
@@ -144,6 +201,35 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
             return ChecklistResultCreateSerializer
         return ChecklistResultListSerializer
 
+    def create(self, request, *args, **kwargs):
+        """Создать новую анкету (сохранить результаты заполнения)."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        result = ChecklistResultService.submit_result(serializer.validated_data)
+
+        output_serializer = ChecklistResultListSerializer(
+            result, context={'request': request}
+        )
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        """Обновить ответы анкеты с созданием новой версии в базе данных."""
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        new_result = ChecklistResultService.update_result(
+            instance, serializer.validated_data
+        )
+
+        output_serializer = ChecklistResultListSerializer(
+            new_result, context={'request': request}
+        )
+        return Response(output_serializer.data, status=status.HTTP_200_OK)
+
     def destroy(self, request, *args, **kwargs):
         """Удалить актуальную версию анкеты и восстановить предыдущую."""
         instance = self.get_object()
@@ -169,14 +255,14 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         'READER может подписывать даже закрытую анкету.',
         request=ChecklistSignSerializer,
         responses={
-            200: inline_serializer(
+            status.HTTP_200_OK: inline_serializer(
                 name='SignSuccessResponse',
                 fields={
                     'message': serializers.CharField(),
                     'is_completed': serializers.BooleanField(),
                 },
             ),
-            400: inline_serializer(
+            status.HTTP_400_BAD_REQUEST: inline_serializer(
                 name='SignErrorResponse', fields={'error': serializers.CharField()}
             ),
         },
@@ -190,135 +276,120 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         """
         result = self.get_object()
 
-        serializer = ChecklistSignSerializer(data=request.data,
-                                             context={'result': result})
+        serializer = ChecklistSignSerializer(
+            data=request.data, context={'result': result}
+        )
         serializer.is_valid(raise_exception=True)
 
         result, created = ChecklistResultService.sign_result(
             result=result,
             role=serializer.validated_data['role'],
-            user_uid=serializer.validated_data['user_uid']
+            user_uid=serializer.validated_data['user_uid'],
+            is_closing=serializer.validated_data['is_closing'],
         )
 
-        msg = "Анкета успешно подписана!" if created else "Подпись успешно обновлена!"
-        return Response({"message": msg, "is_completed": result.is_completed},
-                        status=200)
-
-    @extend_schema(
-        summary='Экспорт анкеты в Excel',
-        description='Генерирует Excel-файл со всеми ответами, комментариями и подписями.',
-        parameters=[
-            OpenApiParameter(name='document_code', required=False, type=str,
-                             description="Код документа"),
-            OpenApiParameter(name='machine_name', required=False, type=str,
-                             description="Человекочитаемое имя машины"),
-        ],
-        responses={200: OpenApiTypes.BINARY},
-    )
-    @action(detail=True, methods=['get'])
-    def export_excel(self, request, pk=None):
-        """
-        Сгенерировать и отдать Excel-файл анкеты для скачивания.
-
-        Эндпоинт: GET /api/v1/results/{id}/export_excel/.
-        """
-        result = self.get_object()
-
-        doc_code = request.query_params.get('document_code', 'ФЗ-Ж04-П1')
-        machine_name = request.query_params.get('machine_name',
-                                                result.template.equipment_uid)
-
-        builder = ExcelChecklistBuilder(
-            result,
-            doc_code,
-            machine_name
+        msg = 'Анкета успешно подписана!' if created else 'Подпись успешно обновлена!'
+        return Response(
+            {'message': msg, 'is_completed': result.is_completed},
+            status=status.HTTP_200_OK,
         )
-        director = ChecklistExportDirector(builder)
-        excel_bytes = director.construct_document()
 
-        response = HttpResponse(excel_bytes,
-                                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
-        safe_uid = str(machine_name).replace(' ', '_')
-        response[
-            'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.xlsx"'
-        return response
+class ChecklistAttachmentViewSet(
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.DestroyModelMixin,
+    viewsets.GenericViewSet,
+):
+    """
+    Отдельный REST-эндпоинт для работы с файлами.
 
-    @extend_schema(
-        summary="Экспорт анкеты в PDF",
-        description="Генерирует PDF-файл печатного бланка анкеты.",
-        parameters=[
-            OpenApiParameter(name='document_code', required=False, type=str,
-                             description="Код документа"),
-            OpenApiParameter(name='machine_name', required=False, type=str,
-                             description="Человекочитаемое имя машины"),
-        ],
-        responses={
-            200: OpenApiTypes.BINARY
-        }
-    )
-    @action(detail=True, methods=['get'])
-    def export_pdf(self, request, pk=None):
-        """
-        Сгенерировать и отдать PDF-файл анкеты для скачивания.
+    Позволяет загружать файлы, скачивать/просматривать и удалять их.
+    Не поддерживает PUT/PATCH (файлы нельзя "обновить", только удалить и залить новый).
+    """
 
-        Эндпоинт: GET /api/v1/results/{id}/export_pdf/.
-        """
-        result = self.get_object()
+    queryset = ChecklistAttachment.objects.select_related('result')
+    parser_classes = [MultiPartParser, FormParser]
 
-        doc_code = request.query_params.get('document_code', 'ФЗ-Ж04-П1')
-        machine_name = request.query_params.get('machine_name',
-                                                result.template.equipment_uid)
-
-        builder = PdfChecklistBuilder(
-            result,
-            doc_code,
-            machine_name
-        )
-        director = ChecklistExportDirector(builder)
-        pdf_bytes = director.construct_document()
-
-        response = HttpResponse(pdf_bytes, content_type='application/pdf')
-
-        safe_uid = str(machine_name).replace(' ', '_')
-        response[
-            'Content-Disposition'] = f'attachment; filename="Checklist_{result.id}_{safe_uid}.pdf"'
-        return response
+    def get_serializer_class(self):
+        """Определить сериализатор в зависимости от типа запроса."""
+        if self.action == 'create':
+            return ChecklistAttachmentUploadSerializer
+        return ChecklistAttachmentSerializer
 
     @extend_schema(
-        summary='Прикрепить файл к анкете',
-        description='Загрузка фото/документов. Файл нужно передавать через form-data.',
+        summary='Загрузить прикрепленный файл',
+        description='Загрузка фото/документов к анкете. Обязательно используйте multipart/form-data.',
         request={
             'multipart/form-data': {
                 'type': 'object',
                 'properties': {
+                    'result': {
+                        'type': 'integer',
+                        'description': 'ID заполненной анкеты',
+                    },
                     'file': {
                         'type': 'string',
-                        'format': 'binary'
-                    }
+                        'format': 'binary',
+                        'description': 'Сам файл',
+                    },
                 },
-                'required': ['file']
+                'required': ['result', 'file'],
             }
         },
-        responses={201: ChecklistAttachmentSerializer},
+        responses={status.HTTP_201_CREATED: ChecklistAttachmentSerializer},
     )
-    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser, FormParser])
-    def upload_attachment(self, request, pk=None):
-        """
-        Загрузить медиафайл (фото/документ) к анкете.
-
-        Проверяет статус анкеты в Сервисном слое перед сохранением.
-        """
-        serializer = ChecklistAttachmentUploadSerializer(data=request.data)
+    def create(self, request, *args, **kwargs):
+        """Загрузить новый прикрепленный файл к анкете."""
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         attachment = ChecklistResultService.add_attachment(
-            result_id=pk, file_obj=serializer.validated_data['file']
+            result=serializer.validated_data['result'],
+            file_obj=serializer.validated_data['file'],
         )
 
-        return Response(
-            ChecklistAttachmentSerializer(
-                attachment, context={'request': request}
-            ).data,
-            status=status.HTTP_201_CREATED,
+        output_serializer = ChecklistAttachmentSerializer(
+            attachment, context={'request': request}
         )
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, *args, **kwargs):
+        """Перехватить удаление и отдать в Сервис."""
+        attachment = self.get_object()
+
+        try:
+            ChecklistResultService.delete_attachment(attachment)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except ValidationError as e:
+            return Response(
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+    @extend_schema(
+        summary='Принудительное скачивание файла',
+        description='Отдает файл в виде бинарного потока с заголовком attachment (заставляет браузер скачать файл, а не открыть его).',
+        responses={status.HTTP_200_OK: OpenApiTypes.BINARY},
+    )
+    @action(detail=True, methods=['get'])
+    def download(self, request, pk=None):
+        """
+        Эндпоинт для скачивания конкретного вложения по его ID.
+
+        Эндпоинт: GET /api/v1/attachments/{id}/download/.
+        """
+        attachment = self.get_object()
+
+        if not attachment.file:
+            return Response(
+                {'error': 'Физ. файл не найден на сервере.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        response = FileResponse(attachment.file.open('rb'))
+
+        filename = os.path.basename(attachment.file.name)
+
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+
+        return response
