@@ -1,4 +1,5 @@
 """Представления для API управления шаблонами и результатами чек-листов."""
+
 import os
 
 from django.http import FileResponse
@@ -98,7 +99,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
         if instance.results.exists():
             return Response(
-                {"error": "Невозможно удалить шаблон, по нему уже есть анкеты."},
+                {'error': 'Невозможно удалить шаблон, по нему уже есть анкеты.'},
                 status=400,
             )
 
@@ -121,10 +122,10 @@ class TemplateViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @extend_schema(
-        summary="Клонировать шаблон",
-        description="Создает полную копию шаблона (включая все группы, поля и варианты выбора) для другого оборудования. Клон создается в статусе Черновика.",
+        summary='Клонировать шаблон',
+        description='Создает полную копию шаблона (включая все группы, поля и варианты выбора) для другого оборудования. Клон создается в статусе Черновика.',
         request=TemplateCloneSerializer,
-        responses={status.HTTP_201_CREATED: TemplateSerializer}
+        responses={status.HTTP_201_CREATED: TemplateSerializer},
     )
     @action(detail=True, methods=['post'])
     def clone(self, request, pk=None):
@@ -140,15 +141,16 @@ class TemplateViewSet(viewsets.ModelViewSet):
         new_uid = serializer.validated_data['equipment_uid']
 
         try:
-            new_template = TemplateService.clone_template(original_template,
-                                                          new_equipment_uid=new_uid)
+            new_template = TemplateService.clone_template(
+                original_template, new_equipment_uid=new_uid
+            )
         except ValidationError as e:
-            return Response({"error": str(e.detail[0])},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         response_serializer = self.get_serializer(new_template)
-        return Response(response_serializer.data,
-                        status=status.HTTP_201_CREATED)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
@@ -286,9 +288,9 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
             is_closing=serializer.validated_data['is_closing'],
         )
 
-        msg = "Анкета успешно подписана!" if created else "Подпись успешно обновлена!"
+        msg = 'Анкета успешно подписана!' if created else 'Подпись успешно обновлена!'
         return Response(
-            {"message": msg, "is_completed": result.is_completed},
+            {'message': msg, 'is_completed': result.is_completed},
             status=status.HTTP_200_OK,
         )
 
@@ -316,26 +318,26 @@ class ChecklistAttachmentViewSet(
         return ChecklistAttachmentSerializer
 
     @extend_schema(
-        summary="Загрузить прикрепленный файл",
-        description="Загрузка фото/документов к анкете. Обязательно используйте multipart/form-data.",
+        summary='Загрузить прикрепленный файл',
+        description='Загрузка фото/документов к анкете. Обязательно используйте multipart/form-data.',
         request={
             'multipart/form-data': {
                 'type': 'object',
                 'properties': {
                     'result': {
                         'type': 'integer',
-                        'description': 'ID заполненной анкеты'
+                        'description': 'ID заполненной анкеты',
                     },
                     'file': {
                         'type': 'string',
                         'format': 'binary',
-                        'description': 'Сам файл'
-                    }
+                        'description': 'Сам файл',
+                    },
                 },
-                'required': ['result', 'file']
+                'required': ['result', 'file'],
             }
         },
-        responses={status.HTTP_201_CREATED: ChecklistAttachmentSerializer}
+        responses={status.HTTP_201_CREATED: ChecklistAttachmentSerializer},
     )
     def create(self, request, *args, **kwargs):
         """Загрузить новый прикрепленный файл к анкете."""
@@ -361,13 +363,13 @@ class ChecklistAttachmentViewSet(
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ValidationError as e:
             return Response(
-                {"error": str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
+                {'error': str(e.detail[0])}, status=status.HTTP_400_BAD_REQUEST
             )
 
     @extend_schema(
-        summary="Принудительное скачивание файла",
-        description="Отдает файл в виде бинарного потока с заголовком attachment (заставляет браузер скачать файл, а не открыть его).",
-        responses={status.HTTP_200_OK: OpenApiTypes.BINARY}
+        summary='Принудительное скачивание файла',
+        description='Отдает файл в виде бинарного потока с заголовком attachment (заставляет браузер скачать файл, а не открыть его).',
+        responses={status.HTTP_200_OK: OpenApiTypes.BINARY},
     )
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
@@ -379,8 +381,10 @@ class ChecklistAttachmentViewSet(
         attachment = self.get_object()
 
         if not attachment.file:
-            return Response({"error": "Физ. файл не найден на сервере."},
-                            status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {'error': 'Физ. файл не найден на сервере.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
         response = FileResponse(attachment.file.open('rb'))
 

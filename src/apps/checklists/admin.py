@@ -1,4 +1,5 @@
 """Конфигурация административной панели для управления шаблонами и результатами."""
+
 import nested_admin
 from django.contrib import admin
 from django.utils.html import format_html
@@ -28,14 +29,7 @@ class TemplateFieldInline(nested_admin.NestedTabularInline):
 
     model = TemplateField
     extra = 0
-    fields = (
-        'name',
-        'field_type',
-        'is_required',
-        'order',
-        'default_value',
-        'metadata'
-    )
+    fields = ('name', 'field_type', 'is_required', 'order', 'default_value', 'metadata')
     inlines = [FieldChoiceInline]
 
 
@@ -59,9 +53,15 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
         'get_is_draft',
         'get_is_deprecated',
         'created_at',
-        'updated_at'
+        'updated_at',
     )
-    list_filter = ('is_draft', 'checklist_type', 'is_deprecated', 'created_at', 'updated_at')
+    list_filter = (
+        'is_draft',
+        'checklist_type',
+        'is_deprecated',
+        'created_at',
+        'updated_at',
+    )
     search_fields = ('name', 'equipment_uid')
 
     inlines = [TemplateFieldGroupInline]
@@ -76,15 +76,17 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
         """Форматирует отображение статуса черновика шаблона."""
         if obj.is_draft:
             return format_html(
-                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
-        return "Нет"
+                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>'
+            )
+        return 'Нет'
 
     @admin.display(description='Актуальность', ordering='is_deprecated')
     def get_is_deprecated(self, obj):
         """Форматирует отображение статуса неактуальности шаблона."""
         if obj.is_deprecated:
             return format_html(
-                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>')
+                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>'
+            )
         return format_html('<span style="color: #16A34A;">Актуальный</span>')
 
 
@@ -119,7 +121,8 @@ class ChecklistAnswerInline(admin.TabularInline):
         """Форматирует отображение метки отклонений у поля ответа."""
         if obj.is_violation:
             return format_html(
-                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>')
+                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>'
+            )
         return format_html('<span style="color: #16A34A;">Нет</span>')
 
 
@@ -160,7 +163,7 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         'shift_number',
         'template__checklist_type',
         'created_at',
-        'updated_at'
+        'updated_at',
     )
     search_fields = (
         'user_uid',
@@ -170,7 +173,11 @@ class ChecklistResultAdmin(admin.ModelAdmin):
     )
     readonly_fields = ('created_at', 'updated_at')
     raw_id_fields = ('template', 'origin')
-    inlines = [ChecklistSignatureInline, ChecklistAnswerInline, ChecklistAttachmentInline]
+    inlines = [
+        ChecklistSignatureInline,
+        ChecklistAnswerInline,
+        ChecklistAttachmentInline,
+    ]
 
     list_select_related = ('template',)
 
@@ -188,7 +195,8 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         """Метод для понятной простому человеку отрисовки отклонений в анкете."""
         if obj.has_violations:
             return format_html(
-                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>')
+                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>'
+            )
         return format_html('<span style="color: #16A34A;">Нет</span>')
 
     @admin.display(description='Черновик', ordering='is_draft')
@@ -196,13 +204,15 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         """Метод для понятной простому человеку отрисовки статуса черновика анкеты."""
         if obj.is_draft:
             return format_html(
-                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>')
-        return "Нет (Чистовик)"
+                '<span style="color: #D97706; font-weight: bold;">📝 Да</span>'
+            )
+        return 'Нет (Чистовик)'
 
     @admin.display(description='Актуальность', ordering='is_deprecated')
     def get_is_deprecated(self, obj):
         """Метод для понятной простому человеку отрисовки неактуальности анкеты."""
         if obj.is_deprecated:
             return format_html(
-                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>')
+                '<span style="color: #9CA3AF;">Устарел (В архиве)</span>'
+            )
         return format_html('<span style="color: #16A34A;">Актуальный</span>')

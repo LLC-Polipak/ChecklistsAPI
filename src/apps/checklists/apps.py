@@ -1,4 +1,5 @@
 """Конфигурация Django-приложения для работы с чек-листами."""
+
 from django.apps import AppConfig
 
 

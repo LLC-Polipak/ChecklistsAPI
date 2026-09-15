@@ -18,18 +18,23 @@ class TemplateManager(models.Manager):
         Returns:
             Объект Template со всей загруженной иерархией полей, либо None.
         """
-        return (self.get_queryset().active()
-                .for_equipment(equipment_uid, checklist_type)
-                .with_full_hierarchy().first())
+        return (
+            self.get_queryset()
+            .active()
+            .for_equipment(equipment_uid, checklist_type)
+            .with_full_hierarchy()
+            .first()
+        )
 
-    def deprecate_all(self, equipment_uid: str, checklist_type: str, exclude_id: int = None):
+    def deprecate_all(
+        self, equipment_uid: str, checklist_type: str, exclude_id: int = None
+    ):
         """
         Мягко удалить (Soft Delete) все активные шаблоны указанного типа.
 
         Используется при создании новой версии шаблона для сохранения историчности.
         """
-        qs = self.get_queryset().active().for_equipment(equipment_uid,
-                                                        checklist_type)
+        qs = self.get_queryset().active().for_equipment(equipment_uid, checklist_type)
         if exclude_id:
             qs = qs.exclude(id=exclude_id)
         qs.update(is_deprecated=True)
@@ -85,8 +90,7 @@ class ChecklistResultManager(models.Manager):
 
         Срабатывает, если текущая активная версия анкеты была удалена.
         """
-        active_exists = (self.get_queryset().active()
-                         .related_history(origin_id).exists())
+        active_exists = self.get_queryset().active().related_history(origin_id).exists()
 
         if not active_exists:
             latest = (

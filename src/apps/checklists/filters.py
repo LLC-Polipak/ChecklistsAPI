@@ -1,4 +1,5 @@
 """Фильтры для управления поиском в шаблонах и результатах чек-листов."""
+
 from datetime import datetime, time
 
 import django_filters
@@ -16,25 +17,17 @@ class TemplateFilter(django_filters.FilterSet):
     """
 
     created_date_from = django_filters.DateFilter(
-        field_name='created_at',
-        lookup_expr='gte',
-        label='Создано с (Дата)'
+        field_name='created_at', lookup_expr='gte', label='Создано с (Дата)'
     )
     updated_date_from = django_filters.DateFilter(
-        field_name='updated_at',
-        lookup_expr='gte',
-        label='Обновлено с (Дата)'
+        field_name='updated_at', lookup_expr='gte', label='Обновлено с (Дата)'
     )
 
     created_date_to = django_filters.DateFilter(
-        method='filter_end_of_day',
-        field_name='created_at',
-        label='Создано по (Дата)'
+        method='filter_end_of_day', field_name='created_at', label='Создано по (Дата)'
     )
     updated_date_to = django_filters.DateFilter(
-        method='filter_end_of_day',
-        field_name='updated_at',
-        label='Обновлено по (Дата)'
+        method='filter_end_of_day', field_name='updated_at', label='Обновлено по (Дата)'
     )
 
     class Meta:
@@ -44,7 +37,7 @@ class TemplateFilter(django_filters.FilterSet):
     def filter_end_of_day(self, queryset, name, value):
         """Превращает дату в конец дня: YYYY-MM-DD 23:59:59.999999."""
         end_of_day = make_aware(datetime.combine(value, time.max))
-        return queryset.filter(**{f"{name}__lte": end_of_day})
+        return queryset.filter(**{f'{name}__lte': end_of_day})
 
 
 class ChecklistResultFilter(django_filters.FilterSet):
@@ -59,25 +52,17 @@ class ChecklistResultFilter(django_filters.FilterSet):
         field_name='template__equipment_uid', lookup_expr='exact'
     )
     created_date_from = django_filters.DateFilter(
-        field_name='created_at',
-        lookup_expr='gte',
-        label='Заполнено с (Дата)'
+        field_name='created_at', lookup_expr='gte', label='Заполнено с (Дата)'
     )
     updated_date_from = django_filters.DateFilter(
-        field_name='updated_at',
-        lookup_expr='gte',
-        label='Обновлено с (Дата)'
+        field_name='updated_at', lookup_expr='gte', label='Обновлено с (Дата)'
     )
 
     created_date_to = django_filters.DateFilter(
-        method='filter_end_of_day',
-        field_name='created_at',
-        label='Заполнено по (Дата)'
+        method='filter_end_of_day', field_name='created_at', label='Заполнено по (Дата)'
     )
     updated_date_to = django_filters.DateFilter(
-        method='filter_end_of_day',
-        field_name='updated_at',
-        label='Обновлено по (Дата)'
+        method='filter_end_of_day', field_name='updated_at', label='Обновлено по (Дата)'
     )
 
     class Meta:
@@ -97,4 +82,4 @@ class ChecklistResultFilter(django_filters.FilterSet):
     def filter_end_of_day(self, queryset, name, value):
         """Превращает дату в конец дня для использования индексов БД."""
         end_of_day = make_aware(datetime.combine(value, time.max))
-        return queryset.filter(**{f"{name}__lte": end_of_day})
+        return queryset.filter(**{f'{name}__lte': end_of_day})

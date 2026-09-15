@@ -1,4 +1,5 @@
 """Сервисы для управления бизнес-логикой шаблонов и результатов чек-листов."""
+
 import datetime
 
 from django.db import transaction
@@ -42,7 +43,7 @@ class TemplateService:
         if not is_draft:
             Template.objects.deprecate_all(
                 validated_data.get('equipment_uid'),
-                validated_data.get('checklist_type')
+                validated_data.get('checklist_type'),
             )
 
         template = Template.objects.create(**validated_data)
@@ -61,7 +62,8 @@ class TemplateService:
         """
         if instance.results.exists():
             raise ValidationError(
-                "Невозможно изменить шаблон, по нему уже есть анкеты.")
+                'Невозможно изменить шаблон, по нему уже есть анкеты.'
+            )
 
         groups_data = validated_data.pop('groups', None)
         was_draft = instance.is_draft
@@ -73,9 +75,7 @@ class TemplateService:
 
         if was_draft and not is_draft:
             Template.objects.deprecate_all(
-                instance.equipment_uid,
-                instance.checklist_type,
-                exclude_id=instance.id
+                instance.equipment_uid, instance.checklist_type, exclude_id=instance.id
             )
 
         instance.save()
@@ -120,8 +120,7 @@ class TemplateService:
 
     @classmethod
     @transaction.atomic
-    def clone_template(cls, instance: Template,
-                       new_equipment_uid: str) -> Template:
+    def clone_template(cls, instance: Template, new_equipment_uid: str) -> Template:
         """
         Бизнес-логика клонирования шаблона.
 
@@ -130,27 +129,26 @@ class TemplateService:
         """
         if instance.equipment_uid == new_equipment_uid:
             raise ValidationError(
-                "Новый UID оборудования должен отличаться от оригинального.")
+                'Новый UID оборудования должен отличаться от оригинального.'
+            )
 
         new_template = Template.objects.create(
-            name=f"{instance.name} (Копия)",
+            name=f'{instance.name} (Копия)',
             equipment_uid=new_equipment_uid,
             checklist_type=instance.checklist_type,
             is_draft=False,
-            is_deprecated=False
+            is_deprecated=False,
         )
 
         for old_group in instance.groups.all():
-            old_fields = list(
-                old_group.fields.all())
+            old_fields = list(old_group.fields.all())
 
             old_group.pk = None
             old_group.template = new_template
             old_group.save()
 
             for old_field in old_fields:
-                old_choices = list(
-                    old_field.choices.all())
+                old_choices = list(old_field.choices.all())
 
                 old_field.pk = None
                 old_field.group = old_group
@@ -158,8 +156,7 @@ class TemplateService:
 
                 if old_choices:
                     new_choices = [
-                        FieldChoice(field=old_field, value=c.value,
-                                    order=c.order)
+                        FieldChoice(field=old_field, value=c.value, order=c.order)
                         for c in old_choices
                     ]
                     FieldChoice.objects.bulk_create(new_choices)
@@ -192,7 +189,7 @@ class ChecklistResultService:
         result = ChecklistResult.objects.create(**validated_data)
 
         cls._save_answers(result, answers_data)
-        cls._upsert_signature(result, "Составитель", result.user_uid)
+        cls._upsert_signature(result, 'Составитель', result.user_uid)
 
         return result
 
@@ -232,7 +229,9 @@ class ChecklistResultService:
         return new_result
 
     @classmethod
-    def sign_result(cls, result: ChecklistResult, role: str, user_uid: str, is_closing: bool = False):
+    def sign_result(
+        cls, result: ChecklistResult, role: str, user_uid: str, is_closing: bool = False
+    ):
         """
         Добавить электронную подпись к анкете.
 
@@ -297,9 +296,9 @@ class ChecklistResultService:
         2. Запрещено удалять файл у исторических версий анкеты.
         """
         if attachment.result.is_deprecated:
-            raise ValidationError("Нельзя удалять файлы из устаревшей анкеты.")
+            raise ValidationError('Нельзя удалять файлы из устаревшей анкеты.')
         if attachment.result.is_completed:
-            raise ValidationError("Анкета закрыта, удаление файлов запрещено.")
+            raise ValidationError('Анкета закрыта, удаление файлов запрещено.')
 
         if attachment.file:
             attachment.file.delete(save=False)
@@ -326,7 +325,7 @@ class ChecklistResultService:
                     field=field,
                     value=value,
                     comment=item['comment'],
-                    is_violation=is_violation
+                    is_violation=is_violation,
                 )
             )
 
@@ -353,7 +352,7 @@ class ChecklistResultService:
     def _check_violation(cls, field: TemplateField, value: str) -> bool:
         """Анализировать ответ пользователя на предмет отклонений."""
         meta = field.metadata
-        if not meta or value == "":
+        if not meta or value == '':
             return False
 
         handlers = {
