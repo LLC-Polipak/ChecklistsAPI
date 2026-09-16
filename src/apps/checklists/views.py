@@ -174,7 +174,9 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
     search_fields = [
         'user_uid',
-        'template__nameanswers__value',
+        'template__equipment_uid',
+        'template__name',
+        'answers__value',
         'answers__comment',
     ]
     ordering_fields = ['created_at', 'updated_at']
