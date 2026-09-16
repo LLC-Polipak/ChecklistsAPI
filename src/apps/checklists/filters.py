@@ -53,6 +53,10 @@ class ChecklistResultFilter(django_filters.FilterSet):
     модель шаблона, а также по метаданным заполнения.
     """
 
+    equipment_uid = django_filters.CharFilter(
+        field_name='template__equipment_uid', lookup_expr='exact'
+    )
+
     created_date_from = django_filters.DateFilter(
         field_name='created_at', lookup_expr='gte', label='Заполнено с (Дата)'
     )
@@ -71,6 +75,7 @@ class ChecklistResultFilter(django_filters.FilterSet):
         model = ChecklistResult
         fields = [
             'user_uid',
+            'equipment_uid',
             'external_id',
             'source_service',
             'shift_number',
