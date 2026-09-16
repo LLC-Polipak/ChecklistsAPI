@@ -2,6 +2,8 @@
 
 import nested_admin
 from django.contrib import admin
+from django.db import models
+from django.forms import Textarea, TextInput
 from django.utils.html import format_html
 
 from apps.checklists.models import (
@@ -31,6 +33,15 @@ class TemplateFieldInline(nested_admin.NestedTabularInline):
     extra = 0
     fields = ('name', 'field_type', 'is_required', 'order', 'default_value', 'metadata')
     inlines = [FieldChoiceInline]
+
+    formfield_overrides = {
+        models.TextField: {
+            'widget': TextInput(attrs={'size': '15', 'placeholder': 'Значение...'})
+        },
+        models.JSONField: {
+            'widget': Textarea(attrs={'rows': 5, 'cols': 25, 'placeholder': '{}'})
+        },
+    }
 
 
 class TemplateFieldGroupInline(nested_admin.NestedStackedInline):
@@ -144,7 +155,7 @@ class ChecklistResultAdmin(admin.ModelAdmin):
 
     list_display = (
         'id',
-        'get_equipment',
+        'get_template_name',
         'user_uid',
         'source_service',
         'shift_number',
@@ -167,7 +178,7 @@ class ChecklistResultAdmin(admin.ModelAdmin):
     )
     search_fields = (
         'user_uid',
-        'template__equipment_uid',
+        'template__name',
         'external_id',
         'source_service',
     )
@@ -185,10 +196,10 @@ class ChecklistResultAdmin(admin.ModelAdmin):
 
     date_hierarchy = 'created_at'
 
-    @admin.display(description='Оборудование', ordering='template__equipment_uid')
-    def get_equipment(self, obj):
-        """Получить UID оборудования из связанного шаблона."""
-        return obj.template.equipment_uid
+    @admin.display(description='Название шаблона', ordering='template__name')
+    def get_template_name(self, obj):
+        """Получить название из связанного шаблона."""
+        return obj.template.name
 
     @admin.display(description='Отклонения', ordering='has_violations')
     def get_has_violations(self, obj):

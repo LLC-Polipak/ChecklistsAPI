@@ -569,16 +569,15 @@ class ChecklistSignSerializer(serializers.Serializer):
 class ChecklistSignatureSerializer(serializers.ModelSerializer):
     """Представить электронную подпись анкеты."""
 
-    role_display = serializers.CharField(source='get_role_display', read_only=True)
-
     class Meta:
         model = ChecklistSignature
-        fields = ['role', 'role_display', 'user_uid', 'signed_at']
+        fields = ['role', 'user_uid', 'signed_at']
 
 
 class ChecklistResultListSerializer(serializers.ModelSerializer):
     """Представить историю и детальную информацию заполненных анкет."""
 
+    template_name = serializers.CharField(source='template.name', read_only=True)
     checklist_type = serializers.CharField(
         source='template.checklist_type', read_only=True
     )
@@ -598,6 +597,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
         model = ChecklistResult
         fields = [
             'id',
+            'template_name',
             'equipment_uid',
             'user_uid',
             'external_id',
