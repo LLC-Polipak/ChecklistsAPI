@@ -189,7 +189,7 @@ class ChecklistResultService:
         result = ChecklistResult.objects.create(**validated_data)
 
         cls._save_answers(result, answers_data)
-        cls._upsert_signature(result, 'Составитель', result.user_uid)
+        cls._upsert_signature(result, 'AUTHOR', result.user_uid)
 
         return result
 
@@ -243,7 +243,6 @@ class ChecklistResultService:
         """
         signature, created = cls._upsert_signature(result, role, user_uid)
 
-        # Если эта подпись является закрывающей (финальной)
         if is_closing and not result.is_completed:
             result.is_completed = True
             result.save(update_fields=['is_completed'])

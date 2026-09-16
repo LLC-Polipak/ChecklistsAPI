@@ -569,11 +569,9 @@ class ChecklistSignSerializer(serializers.Serializer):
 class ChecklistSignatureSerializer(serializers.ModelSerializer):
     """Представить электронную подпись анкеты."""
 
-    role_display = serializers.CharField(source='get_role_display', read_only=True)
-
     class Meta:
         model = ChecklistSignature
-        fields = ['role', 'role_display', 'user_uid', 'signed_at']
+        fields = ['role', 'user_uid', 'signed_at']
 
 
 class ChecklistResultListSerializer(serializers.ModelSerializer):
