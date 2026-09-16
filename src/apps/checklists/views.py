@@ -45,7 +45,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
     ]
     filterset_class = TemplateFilter
 
-    search_fields = ['equipment_uid', 'groups__fields__name']
+    search_fields = ['equipment_uid', 'name', 'groups__fields__name']
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
@@ -174,8 +174,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
     search_fields = [
         'user_uid',
-        'template__equipment_uid',
-        'answers__value',
+        'template__nameanswers__value',
         'answers__comment',
     ]
     ordering_fields = ['created_at', 'updated_at']

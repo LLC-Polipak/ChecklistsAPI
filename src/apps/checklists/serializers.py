@@ -577,6 +577,7 @@ class ChecklistSignatureSerializer(serializers.ModelSerializer):
 class ChecklistResultListSerializer(serializers.ModelSerializer):
     """Представить историю и детальную информацию заполненных анкет."""
 
+    template_name = serializers.CharField(source='template.name', read_only=True)
     checklist_type = serializers.CharField(
         source='template.checklist_type', read_only=True
     )
@@ -596,6 +597,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
         model = ChecklistResult
         fields = [
             'id',
+            'template_name',
             'equipment_uid',
             'user_uid',
             'external_id',
