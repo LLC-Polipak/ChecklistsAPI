@@ -63,8 +63,7 @@ def clone_templates_action(modeladmin, request, queryset):
         count += 1
 
     modeladmin.message_user(
-        request, f'Успешно создано {count} копий шаблонов.',
-        messages.SUCCESS
+        request, f'Успешно создано {count} копий шаблонов.', messages.SUCCESS
     )
 
 

@@ -119,7 +119,7 @@ class TemplateService:
             name=f'{instance.name} (Копия)',
             equipment_uid=new_equipment_uid,
             checklist_type=instance.checklist_type,
-            is_draft=True,
+            is_draft=False,
             is_deprecated=False,
         )
         cls._copy_hierarchy(instance, new_template)
