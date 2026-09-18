@@ -23,7 +23,11 @@ from apps.checklists.serializers import (
     TemplateCloneSerializer,
     TemplateSerializer,
 )
-from apps.checklists.services import ChecklistResultService, TemplateService
+from apps.checklists.services import (
+    AttachmentService,
+    ChecklistResultService,
+    TemplateService,
+)
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
@@ -345,7 +349,7 @@ class ChecklistAttachmentViewSet(
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        attachment = ChecklistResultService.add_attachment(
+        attachment = AttachmentService.add_attachment(
             result=serializer.validated_data['result'],
             file_obj=serializer.validated_data['file'],
         )
@@ -360,7 +364,7 @@ class ChecklistAttachmentViewSet(
         attachment = self.get_object()
 
         try:
-            ChecklistResultService.delete_attachment(attachment)
+            AttachmentService.delete_attachment(attachment)
             return Response(status=status.HTTP_204_NO_CONTENT)
         except ValidationError as e:
             return Response(

@@ -219,11 +219,6 @@ class TemplateSerializer(serializers.ModelSerializer):
         Защищает используемые шаблоны от изменений и предотвращает
         смену идентичности (UID и Типа).
         """
-        if self.instance and self.instance.results.exists():
-            raise serializers.ValidationError(
-                'Невозможно изменить шаблон, по нему уже есть анкеты.'
-            )
-
         if self.instance:
             if (
                 'equipment_uid' in attrs

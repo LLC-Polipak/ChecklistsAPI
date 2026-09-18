@@ -54,41 +54,39 @@ class TemplateService:
     @transaction.atomic
     def update_template(cls, instance: Template, validated_data: dict) -> Template:
         """
-        Полностью перезаписать иерархию полей существующего шаблона.
+        Создает новую версию шаблона при обновлении (Аудиторский след).
 
-        Шаблон категорически запрещено изменять, если по нему уже заполнялись анкеты,
-        так как это нарушит структуру исторических данных. Для изменения нужно
-        создавать новую версию шаблона через метод create_template.
+        Старая версия помечается как is_deprecated=True.
         """
-        if instance.results.exists():
-            raise ValidationError(
-                'Невозможно изменить шаблон, по нему уже есть анкеты.'
-            )
-
         groups_data = validated_data.pop('groups', None)
-        was_draft = instance.is_draft
 
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
+        new_data = {
+            'equipment_uid': instance.equipment_uid,
+            'checklist_type': instance.checklist_type,
+            'name': validated_data.get('name', instance.name),
+            'is_draft': validated_data.get('is_draft', instance.is_draft),
+        }
 
-        is_draft = instance.is_draft
+        instance.is_deprecated = True
+        instance.save(update_fields=['is_deprecated'])
 
-        if was_draft and not is_draft:
+        if not new_data['is_draft']:
             Template.objects.deprecate_all(
-                instance.equipment_uid, instance.checklist_type, exclude_id=instance.id
+                new_data['equipment_uid'], new_data['checklist_type']
             )
 
-        instance.save()
+        new_template = Template.objects.create(**new_data)
 
         if groups_data is not None:
-            instance.groups.all().delete()
-            cls._save_hierarchy(instance, groups_data)
+            cls._save_hierarchy(new_template, groups_data)
+        else:
+            cls._copy_hierarchy(instance, new_template)
 
-        return instance
+        return new_template
 
     @classmethod
     @transaction.atomic
-    def delete_template(cls, instance):
+    def delete_template(cls, instance: Template) -> None:
         """
         Удалить шаблон с возможностью отката версии.
 
@@ -99,24 +97,9 @@ class TemplateService:
         """
         eq_uid = instance.equipment_uid
         c_type = instance.checklist_type
+
         instance.delete()
         Template.objects.restore_latest_deprecated(eq_uid, c_type)
-
-    @classmethod
-    def _save_hierarchy(cls, template: Template, groups_data: list):
-        """Выполнить сохранение дерева структуры шаблона."""
-        for group_data in groups_data:
-            fields_data = group_data.pop('fields', [])
-            group = TemplateFieldGroup.objects.create(template=template, **group_data)
-
-            for field_data in fields_data:
-                choices_data = field_data.pop('choices', [])
-                field = TemplateField.objects.create(group=group, **field_data)
-
-                if choices_data:
-                    FieldChoice.objects.bulk_create(
-                        [FieldChoice(field=field, **c) for c in choices_data]
-                    )
 
     @classmethod
     @transaction.atomic
@@ -136,15 +119,38 @@ class TemplateService:
             name=f'{instance.name} (Копия)',
             equipment_uid=new_equipment_uid,
             checklist_type=instance.checklist_type,
-            is_draft=False,
+            is_draft=True,
             is_deprecated=False,
         )
+        cls._copy_hierarchy(instance, new_template)
+        return new_template
 
-        for old_group in instance.groups.all():
+    @classmethod
+    def _save_hierarchy(cls, template: Template, groups_data: list) -> None:
+        """Выполнить сохранение дерева структуры шаблона."""
+        for group_data in groups_data:
+            fields_data = group_data.pop('fields', [])
+            group = TemplateFieldGroup.objects.create(template=template, **group_data)
+
+            for field_data in fields_data:
+                choices_data = field_data.pop('choices', [])
+                field = TemplateField.objects.create(group=group, **field_data)
+
+                if choices_data:
+                    FieldChoice.objects.bulk_create(
+                        [FieldChoice(field=field, **c) for c in choices_data]
+                    )
+
+    @classmethod
+    def _copy_hierarchy(
+        cls, source_template: Template, target_template: Template
+    ) -> None:
+        """Вспомогательный метод для глубокого копирования иерархии (для клонов и апдейтов)."""
+        for old_group in source_template.groups.all():
             old_fields = list(old_group.fields.all())
 
             old_group.pk = None
-            old_group.template = new_template
+            old_group.template = target_template
             old_group.save()
 
             for old_field in old_fields:
@@ -161,8 +167,6 @@ class TemplateService:
                     ]
                     FieldChoice.objects.bulk_create(new_choices)
 
-        return new_template
-
 
 class ChecklistResultService:
     """
@@ -174,7 +178,7 @@ class ChecklistResultService:
 
     @classmethod
     @transaction.atomic
-    def submit_result(cls, validated_data: dict):
+    def submit_result(cls, validated_data: dict) -> ChecklistResult:
         """
         Выполнить первичное сохранение ответов пользователя.
 
@@ -195,7 +199,9 @@ class ChecklistResultService:
 
     @classmethod
     @transaction.atomic
-    def update_result(cls, instance, validated_data: dict):
+    def update_result(
+        cls, instance: ChecklistResult, validated_data: dict
+    ) -> ChecklistResult:
         """
         Обновить ответы анкеты с сохранением Аудиторского следа.
 
@@ -231,7 +237,7 @@ class ChecklistResultService:
     @classmethod
     def sign_result(
         cls, result: ChecklistResult, role: str, user_uid: str, is_closing: bool = False
-    ):
+    ) -> tuple[ChecklistResult, bool]:
         """
         Добавить электронную подпись к анкете.
 
@@ -251,7 +257,7 @@ class ChecklistResultService:
 
     @classmethod
     @transaction.atomic
-    def delete_result(cls, instance):
+    def delete_result(cls, instance) -> None:
         """
         Удалить анкету.
 
@@ -263,49 +269,7 @@ class ChecklistResultService:
         ChecklistResult.objects.restore_latest_deprecated(origin_id)
 
     @classmethod
-    def add_attachment(cls, result: ChecklistResult, file_obj) -> ChecklistAttachment:
-        """
-        Прикрепить файл к анкете.
-
-        Бизнес-правила:
-        1. Запрещено добавлять файлы к историческим версиям анкеты.
-        2. Запрещено добавлять файлы к анкете, если она уже завершена.
-
-        Args:
-            result_id: Идентификатор анкеты, к которой крепится файл.
-            file_obj: Объект загруженного файла.
-
-        Returns:
-            ChecklistAttachment: Созданный объект вложения.
-        """
-        if result.is_deprecated:
-            raise ValidationError('Нельзя добавлять файлы к устаревшей анкете.')
-        if result.is_completed:
-            raise ValidationError('Анкета закрыта, добавление файлов запрещено.')
-
-        return ChecklistAttachment.objects.create(result=result, file=file_obj)
-
-    @classmethod
-    def delete_attachment(cls, attachment: ChecklistAttachment):
-        """
-        Удалить файл из анкеты.
-
-        Бизнес-правила:
-        1. Запрещено удалять файл у завершенной анкеты.
-        2. Запрещено удалять файл у исторических версий анкеты.
-        """
-        if attachment.result.is_deprecated:
-            raise ValidationError('Нельзя удалять файлы из устаревшей анкеты.')
-        if attachment.result.is_completed:
-            raise ValidationError('Анкета закрыта, удаление файлов запрещено.')
-
-        if attachment.file:
-            attachment.file.delete(save=False)
-
-        attachment.delete()
-
-    @classmethod
-    def _save_answers(cls, result: ChecklistResult, answers_data: list):
+    def _save_answers(cls, result: ChecklistResult, answers_data: list) -> None:
         """Выполнить сохранение ответов анкеты и проставить метки отклонений."""
         has_violations = False
         answers = []
@@ -335,7 +299,9 @@ class ChecklistResultService:
             result.save(update_fields=['has_violations'])
 
     @classmethod
-    def _upsert_signature(cls, result: ChecklistResult, role: str, user_uid: str):
+    def _upsert_signature(
+        cls, result: ChecklistResult, role: str, user_uid: str
+    ) -> tuple[ChecklistSignature, bool]:
         """Обновить или создать электронную подпись."""
         signature, created = ChecklistSignature.objects.get_or_create(
             result=result, role=role, user_uid=user_uid
@@ -409,3 +375,54 @@ class ChecklistResultService:
             if days_ahead < int(meta['min_days_ahead']):
                 return True
         return False
+
+
+class AttachmentService:
+    """
+    Сервис управления бизнес-логикой вложений к анкетам.
+
+    Отвечает за добавление файла к существующей анкете,
+    а также за ее удаление.
+    """
+
+    @classmethod
+    def add_attachment(cls, result: ChecklistResult, file_obj) -> ChecklistAttachment:
+        """
+        Прикрепить файл к анкете.
+
+        Бизнес-правила:
+        1. Запрещено добавлять файлы к историческим версиям анкеты.
+        2. Запрещено добавлять файлы к анкете, если она уже завершена.
+
+        Args:
+            result: Экземпляр анкеты, к которой крепится файл.
+            file_obj: Объект загруженного файла.
+
+        Returns:
+            ChecklistAttachment: Созданный объект вложения.
+        """
+        if result.is_deprecated:
+            raise ValidationError('Нельзя добавлять файлы к устаревшей анкете.')
+        if result.is_completed:
+            raise ValidationError('Анкета закрыта, добавление файлов запрещено.')
+
+        return ChecklistAttachment.objects.create(result=result, file=file_obj)
+
+    @classmethod
+    def delete_attachment(cls, attachment: ChecklistAttachment) -> None:
+        """
+        Удалить файл из анкеты.
+
+        Бизнес-правила:
+        1. Запрещено удалять файл у завершенной анкеты.
+        2. Запрещено удалять файл у исторических версий анкеты.
+        """
+        if attachment.result.is_deprecated:
+            raise ValidationError('Нельзя удалять файлы из устаревшей анкеты.')
+        if attachment.result.is_completed:
+            raise ValidationError('Анкета закрыта, удаление файлов запрещено.')
+
+        if attachment.file:
+            attachment.file.delete(save=False)
+
+        attachment.delete()

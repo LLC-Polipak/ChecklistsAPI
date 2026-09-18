@@ -1,7 +1,7 @@
 """Конфигурация административной панели для управления шаблонами и результатами."""
 
 import nested_admin
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.db import models
 from django.forms import Textarea, TextInput
 from django.utils.html import format_html
@@ -16,6 +16,7 @@ from apps.checklists.models import (
     TemplateField,
     TemplateFieldGroup,
 )
+from apps.checklists.services import TemplateService
 
 
 class FieldChoiceInline(nested_admin.NestedTabularInline):
@@ -52,6 +53,21 @@ class TemplateFieldGroupInline(nested_admin.NestedStackedInline):
     inlines = [TemplateFieldInline]
 
 
+@admin.action(description='Сделать копию (Черновик) выбранных шаблонов')
+def clone_templates_action(modeladmin, request, queryset):
+    """Кастомное действие для глубокого копирования шаблонов."""
+    count = 0
+    for template in queryset:
+        new_uid = f'{template.equipment_uid}-COPY-{template.id}'
+        TemplateService.clone_template(template, new_equipment_uid=new_uid)
+        count += 1
+
+    modeladmin.message_user(
+        request, f'Успешно создано {count} копий шаблонов.',
+        messages.SUCCESS
+    )
+
+
 @admin.register(Template)
 class TemplateAdmin(nested_admin.NestedModelAdmin):
     """Административный интерфейс для модели шаблонов чек-листов."""
@@ -81,6 +97,8 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
     ordering = ['is_deprecated', '-created_at']
 
     date_hierarchy = 'created_at'
+
+    actions = [clone_templates_action]
 
     @admin.display(description='Черновик', ordering='is_draft')
     def get_is_draft(self, obj):
