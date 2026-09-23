@@ -54,35 +54,58 @@ class TemplateService:
     @transaction.atomic
     def update_template(cls, instance: Template, validated_data: dict) -> Template:
         """
-        Создает новую версию шаблона при обновлении (Аудиторский след).
+        Обновляет шаблон.
 
-        Старая версия помечается как is_deprecated=True.
+        Бизнес-правила:
+        1. Если по шаблону уже есть анкеты -> создает новую версию.
+        2. Если анкет нет -> обновляет текущий шаблон напрямую.
         """
         groups_data = validated_data.pop('groups', None)
 
-        new_data = {
-            'equipment_uid': instance.equipment_uid,
-            'checklist_type': instance.checklist_type,
-            'name': validated_data.get('name', instance.name),
-            'is_draft': validated_data.get('is_draft', instance.is_draft),
-        }
+        if instance.results.exists():
+            new_data = {
+                'equipment_uid': instance.equipment_uid,
+                'checklist_type': instance.checklist_type,
+                'name': validated_data.get('name', instance.name),
+                'is_draft': validated_data.get('is_draft', instance.is_draft),
+            }
 
-        instance.is_deprecated = True
-        instance.save(update_fields=['is_deprecated'])
+            instance.is_deprecated = True
+            instance.save(update_fields=['is_deprecated'])
 
-        if not new_data['is_draft']:
+            if not new_data['is_draft']:
+                Template.objects.deprecate_all(
+                    new_data['equipment_uid'], new_data['checklist_type']
+                )
+
+            new_template = Template.objects.create(**new_data)
+
+            if groups_data is not None:
+                cls._save_hierarchy(new_template, groups_data)
+            else:
+                cls._copy_hierarchy(instance, new_template)
+
+            return new_template
+
+        was_draft = instance.is_draft
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        is_draft = instance.is_draft
+
+        if was_draft and not is_draft:
             Template.objects.deprecate_all(
-                new_data['equipment_uid'], new_data['checklist_type']
+                instance.equipment_uid, instance.checklist_type, exclude_id=instance.id
             )
 
-        new_template = Template.objects.create(**new_data)
+        instance.save()
 
         if groups_data is not None:
-            cls._save_hierarchy(new_template, groups_data)
-        else:
-            cls._copy_hierarchy(instance, new_template)
+            instance.groups.all().delete()
+            cls._save_hierarchy(instance, groups_data)
 
-        return new_template
+        return instance
 
     @classmethod
     @transaction.atomic
