@@ -273,8 +273,14 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
     shift_number = serializers.ChoiceField(choices=ShiftTypes, required=False)
     shift_time = serializers.DateTimeField(required=False, allow_null=True)
+
     is_draft = serializers.BooleanField(default=False)
+    is_completed = serializers.BooleanField(
+        required=False, allow_null=True, default=None
+    )
+
     groups = AnswerGroupSerializer(many=True, allow_empty=True)
+
     general_comment = serializers.CharField(
         allow_blank=True, required=False, default=''
     )
@@ -294,6 +300,13 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         """
         groups_data = attrs.get('groups', [])
         is_draft = attrs.get('is_draft', False)
+        is_completed = attrs.get('is_completed')
+
+        if is_draft:
+            attrs['is_completed'] = False
+        else:
+            if is_completed is None:
+                attrs['is_completed'] = True
 
         template = self._get_active_template(attrs)
 
