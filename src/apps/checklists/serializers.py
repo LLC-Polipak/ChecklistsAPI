@@ -28,7 +28,7 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = FieldChoice
-        fields = ['value', 'order']
+        fields = ['value', 'order', 'is_violation']
 
 
 class TemplateFieldSerializer(serializers.ModelSerializer):

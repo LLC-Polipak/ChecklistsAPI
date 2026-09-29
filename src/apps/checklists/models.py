@@ -128,6 +128,7 @@ class FieldChoice(models.Model):
         TemplateField, on_delete=models.CASCADE, related_name='choices'
     )
     value = models.CharField('Значение варианта', max_length=255)
+    is_violation = models.BooleanField('Считается отклонением', default=False)
     order = models.PositiveIntegerField('Порядок вывода', default=0)
 
     class Meta:
@@ -136,7 +137,8 @@ class FieldChoice(models.Model):
         verbose_name_plural = 'Варианты выбора'
 
     def __str__(self):
-        return self.value
+        alert = " [⚠️]" if self.is_violation else ""
+        return f"{self.value}{alert}"
 
 
 class ChecklistResult(models.Model):

@@ -6,6 +6,7 @@ from django.db import transaction
 from django.utils.timezone import now
 from rest_framework.exceptions import ValidationError
 
+from apps.checklists.constants import FieldTypes
 from apps.checklists.models import (
     ChecklistAnswer,
     ChecklistAttachment,
@@ -339,6 +340,9 @@ class ChecklistResultService:
     @classmethod
     def _check_violation(cls, field: TemplateField, value: str) -> bool:
         """Анализировать ответ пользователя на предмет отклонений."""
+        if field.field_type == FieldTypes.CHOICE:
+            return cls._is_choice_violation(field, value)
+
         meta = field.metadata
         if not meta or value == '':
             return False
@@ -346,7 +350,6 @@ class ChecklistResultService:
         handlers = {
             'CHECKBOX': cls._is_bool_violation,
             'RADIO': cls._is_bool_violation,
-            'CHOICE': cls._is_choice_violation,
             'NUMBER': cls._is_numeric_violation,
             'DATE': cls._is_date_violation,
             'AUTO_DATE': cls._is_date_violation,
@@ -366,13 +369,6 @@ class ChecklistResultService:
         """Проверить отклонение для логических типов."""
         if 'violation_on' in meta:
             return str(value).lower() == str(meta['violation_on']).lower()
-        return False
-
-    @staticmethod
-    def _is_choice_violation(meta: dict, value: str) -> bool:
-        """Проверить отклонение для списков выбора."""
-        if 'violation_choices' in meta:
-            return value in meta['violation_choices']
         return False
 
     @staticmethod
@@ -396,6 +392,14 @@ class ChecklistResultService:
         if 'min_days_ahead' in meta:
             days_ahead = -days_diff
             if days_ahead < int(meta['min_days_ahead']):
+                return True
+        return False
+
+    @staticmethod
+    def _is_choice_violation(field: TemplateField, value: str) -> bool:
+        """Проверить отклонение для списков выбора."""
+        for choice in field.choices.all():
+            if choice.value == value and choice.is_violation:
                 return True
         return False
 
