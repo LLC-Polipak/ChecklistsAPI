@@ -20,8 +20,7 @@ from apps.checklists.models import (
 
 
 class TemplateService:
-    """
-    Сервис управления бизнес-логикой Шаблонов чек-листов.
+    """Сервис управления бизнес-логикой Шаблонов чек-листов.
 
     Отвечает за версионирование (создание новых версий поверх старых)
     и проверку целостности данных при редактировании.
@@ -30,8 +29,7 @@ class TemplateService:
     @classmethod
     @transaction.atomic
     def create_template(cls, validated_data: dict) -> Template:
-        """
-        Создать новую версию шаблона.
+        """Создать новую версию шаблона.
 
         Бизнес-правила:
         1. Если для данного оборудования и типа проверки уже существовал шаблон,
@@ -45,6 +43,7 @@ class TemplateService:
             Template.objects.deprecate_all(
                 validated_data.get('equipment_uid'),
                 validated_data.get('checklist_type'),
+                validated_data.get('article_uid'),
             )
 
         template = Template.objects.create(**validated_data)
@@ -54,8 +53,7 @@ class TemplateService:
     @classmethod
     @transaction.atomic
     def update_template(cls, instance: Template, validated_data: dict) -> Template:
-        """
-        Обновляет шаблон.
+        """Обновляет шаблон.
 
         Бизнес-правила:
         1. Если по шаблону уже есть анкеты -> создает новую версию.
@@ -66,9 +64,11 @@ class TemplateService:
         if instance.results.exists():
             new_data = {
                 'equipment_uid': instance.equipment_uid,
+                'article_uid': instance.article_uid,
                 'checklist_type': instance.checklist_type,
                 'name': validated_data.get('name', instance.name),
                 'is_draft': validated_data.get('is_draft', instance.is_draft),
+                'is_fillable': validated_data.get('is_fillable', instance.is_fillable),
             }
 
             instance.is_deprecated = True
@@ -76,7 +76,9 @@ class TemplateService:
 
             if not new_data['is_draft']:
                 Template.objects.deprecate_all(
-                    new_data['equipment_uid'], new_data['checklist_type']
+                    new_data['equipment_uid'],
+                    new_data['checklist_type'],
+                    new_data['article_uid'],
                 )
 
             new_template = Template.objects.create(**new_data)
@@ -97,7 +99,10 @@ class TemplateService:
 
         if was_draft and not is_draft:
             Template.objects.deprecate_all(
-                instance.equipment_uid, instance.checklist_type, exclude_id=instance.id
+                instance.equipment_uid,
+                instance.checklist_type,
+                instance.article_uid,
+                exclude_id=instance.id,
             )
 
         instance.save()
@@ -111,8 +116,7 @@ class TemplateService:
     @classmethod
     @transaction.atomic
     def delete_template(cls, instance: Template) -> None:
-        """
-        Удалить шаблон с возможностью отката версии.
+        """Удалить шаблон с возможностью отката версии.
 
         Бизнес-правила:
         1. Нельзя удалить шаблон, если по нему есть заполненные результаты.
@@ -121,28 +125,35 @@ class TemplateService:
         """
         eq_uid = instance.equipment_uid
         c_type = instance.checklist_type
+        art_uid = instance.article_uid
 
         instance.delete()
-        Template.objects.restore_latest_deprecated(eq_uid, c_type)
+        Template.objects.restore_latest_deprecated(eq_uid, c_type, art_uid)
 
     @classmethod
     @transaction.atomic
-    def clone_template(cls, instance: Template, new_equipment_uid: str) -> Template:
-        """
-        Бизнес-логика клонирования шаблона.
+    def clone_template(
+        cls, instance: Template, new_equipment_uid: str, new_article_uid: str = None
+    ) -> Template:
+        """Бизнес-логика клонирования шаблона.
 
         Выполняет глубокое копирование (Deep Copy) всех групп, полей и вариантов.
         Клон всегда создается в статусе "Черновик" для безопасной проверки администратором.
         """
-        if instance.equipment_uid == new_equipment_uid:
+        if (
+            instance.equipment_uid == new_equipment_uid
+            and instance.article_uid == new_article_uid
+        ):
             raise ValidationError(
-                'Новый UID оборудования должен отличаться от оригинального.'
+                'Новая связка "Оборудование + Артикул" должна отличаться от оригинальной.'
             )
 
         new_template = Template.objects.create(
             name=f'{instance.name} (Копия)',
             equipment_uid=new_equipment_uid,
+            article_uid=new_article_uid,
             checklist_type=instance.checklist_type,
+            is_fillable=instance.is_fillable,
             is_draft=False,
             is_deprecated=False,
         )
@@ -193,8 +204,7 @@ class TemplateService:
 
 
 class ChecklistResultService:
-    """
-    Сервис управления бизнес-логикой Заполненных Анкет (Результатов).
+    """Сервис управления бизнес-логикой Заполненных Анкет (Результатов).
 
     Отвечает за Аудиторский след (Audit Trail), проверку подписей и
     отслеживание состояний (Черновик / Чистовик / Завершено).
@@ -203,8 +213,7 @@ class ChecklistResultService:
     @classmethod
     @transaction.atomic
     def submit_result(cls, validated_data: dict) -> ChecklistResult:
-        """
-        Выполнить первичное сохранение ответов пользователя.
+        """Выполнить первичное сохранение ответов пользователя.
 
         Составитель анкеты автоматически подписывает документ ролью AUTHOR.
         """
@@ -226,8 +235,7 @@ class ChecklistResultService:
     def update_result(
         cls, instance: ChecklistResult, validated_data: dict
     ) -> ChecklistResult:
-        """
-        Обновить ответы анкеты с сохранением Аудиторского следа.
+        """Обновить ответы анкеты с сохранением Аудиторского следа.
 
         Бизнес-правила:
         1. Утвержденную (закрытую) анкету изменять нельзя.
@@ -262,8 +270,7 @@ class ChecklistResultService:
     def sign_result(
         cls, result: ChecklistResult, role: str, user_uid: str, is_closing: bool = False
     ) -> tuple[ChecklistResult, bool]:
-        """
-        Добавить электронную подпись к анкете.
+        """Добавить электронную подпись к анкете.
 
         Бизнес-правила:
         1. Черновик (is_draft=True) подписать нельзя.
@@ -282,8 +289,7 @@ class ChecklistResultService:
     @classmethod
     @transaction.atomic
     def delete_result(cls, instance) -> None:
-        """
-        Удалить анкету.
+        """Удалить анкету.
 
         При удалении активной версии (ошибочное исправление),
         система "воскрешает" предыдущую устаревшую версию.
@@ -405,8 +411,7 @@ class ChecklistResultService:
 
 
 class AttachmentService:
-    """
-    Сервис управления бизнес-логикой вложений к анкетам.
+    """Сервис управления бизнес-логикой вложений к анкетам.
 
     Отвечает за добавление файла к существующей анкете,
     а также за ее удаление.
@@ -414,8 +419,7 @@ class AttachmentService:
 
     @classmethod
     def add_attachment(cls, result: ChecklistResult, file_obj) -> ChecklistAttachment:
-        """
-        Прикрепить файл к анкете.
+        """Прикрепить файл к анкете.
 
         Бизнес-правила:
         1. Запрещено добавлять файлы к историческим версиям анкеты.
@@ -437,8 +441,7 @@ class AttachmentService:
 
     @classmethod
     def delete_attachment(cls, attachment: ChecklistAttachment) -> None:
-        """
-        Удалить файл из анкеты.
+        """Удалить файл из анкеты.
 
         Бизнес-правила:
         1. Запрещено удалять файл у завершенной анкеты.

@@ -31,8 +31,7 @@ from apps.checklists.services import (
 
 
 class TemplateViewSet(viewsets.ModelViewSet):
-    """
-    API-контроллер для управления Шаблонами чек-листов (CRUD).
+    """API-контроллер для управления Шаблонами чек-листов (CRUD).
 
     Отвечает за маршрутизацию REST-запросов. Вся сложная бизнес-логика
     делегирована слою сервисов (TemplateService).
@@ -49,13 +48,12 @@ class TemplateViewSet(viewsets.ModelViewSet):
     ]
     filterset_class = TemplateFilter
 
-    search_fields = ['equipment_uid', 'name', 'groups__fields__name']
+    search_fields = ['equipment_uid', 'article_uid', 'name', 'groups__fields__name']
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """
-        Выполнить динамическую фильтрацию QuerySet в зависимости от типа запроса.
+        """Выполнить динамическую фильтрацию QuerySet в зависимости от типа запроса.
 
         - При получении списка (action == 'list') скрывает устаревшие шаблоны.
         - При прямом обращении предоставляет доступ ко всей базе.
@@ -94,8 +92,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
         return Response(output_serializer.data, status=status.HTTP_200_OK)
 
     def destroy(self, request, *args, **kwargs):
-        """
-        Обработать запрос на удаление шаблона.
+        """Обработать запрос на удаление шаблона.
 
         Сервис проверит бизнес-правила и попытается восстановить предыдущую версию.
         """
@@ -113,8 +110,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
-        """
-        Получить хронологическую историю изменений (все версии) шаблона.
+        """Получить хронологическую историю изменений (все версии) шаблона.
 
         Эндпоинт: GET /api/v1/templates/{id}/history/.
         """
@@ -133,8 +129,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['post'])
     def clone(self, request, pk=None):
-        """
-        Клонировать существующий шаблон для новой машины.
+        """Клонировать существующий шаблон для новой машины.
 
         Эндпоинт: GET /api/v1/templates/{id}/clone/.
         """
@@ -143,10 +138,15 @@ class TemplateViewSet(viewsets.ModelViewSet):
         serializer = TemplateCloneSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_uid = serializer.validated_data['equipment_uid']
+        new_article = serializer.validated_data.get(
+            'article_uid', original_template.article_uid
+        )
 
         try:
             new_template = TemplateService.clone_template(
-                original_template, new_equipment_uid=new_uid
+                original_template,
+                new_equipment_uid=new_uid,
+                new_article_uid=new_article,
             )
         except ValidationError as e:
             return Response(
@@ -158,8 +158,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
 
 
 class ChecklistResultViewSet(viewsets.ModelViewSet):
-    """
-    API-контроллер для управления Заполненными анкетами (Результатами).
+    """API-контроллер для управления Заполненными анкетами (Результатами).
 
     Обеспечивает создание черновиков, систему электронных подписей и
     аудиторский след (Audit Trail) при редактировании анкет.
@@ -179,6 +178,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     search_fields = [
         'user_uid',
         'template__equipment_uid',
+        'template__article_uid',
         'template__name',
         'answers__value',
         'answers__comment',
@@ -196,8 +196,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_serializer_class(self):
-        """
-        Определить класс сериализатора в зависимости от действия.
+        """Определить класс сериализатора в зависимости от действия.
 
         - Запись: использует строгий валидатор.
         - Чтение: использует DTO с полной разверткой связей.
@@ -243,8 +242,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
-        """
-        Получить всю цепочку исправлений (версий) данной анкеты.
+        """Получить всю цепочку исправлений (версий) данной анкеты.
 
         Эндпоинт: GET /api/v1/results/{id}/history/.
         """
@@ -274,8 +272,7 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     )
     @action(detail=True, methods=['post'])
     def sign(self, request, pk=None):
-        """
-        Добавить или обновить электронную подпись к анкете.
+        """Добавить или обновить электронную подпись к анкете.
 
         Бизнес-логика защиты инкапсулирована в ChecklistResultService.
         """
@@ -306,8 +303,7 @@ class ChecklistAttachmentViewSet(
     mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
-    """
-    Отдельный REST-эндпоинт для работы с файлами.
+    """Отдельный REST-эндпоинт для работы с файлами.
 
     Позволяет загружать файлы, скачивать/просматривать и удалять их.
     Не поддерживает PUT/PATCH (файлы нельзя "обновить", только удалить и залить новый).
@@ -378,8 +374,7 @@ class ChecklistAttachmentViewSet(
     )
     @action(detail=True, methods=['get'])
     def download(self, request, pk=None):
-        """
-        Эндпоинт для скачивания конкретного вложения по его ID.
+        """Эндпоинт для скачивания конкретного вложения по его ID.
 
         Эндпоинт: GET /api/v1/attachments/{id}/download/.
         """

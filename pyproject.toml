@@ -54,7 +54,7 @@ select = [
 ]
 
 [tool.ruff.lint.pydocstyle]
-convention = "pep257"
+convention = "google"
 
 [tool.ruff.lint.flake8-quotes]
 docstring-quotes = "double"

@@ -20,8 +20,7 @@ from apps.checklists.models import (
 
 
 class FieldChoiceSerializer(serializers.ModelSerializer):
-    """
-    Сериализовать варианты ответов.
+    """Сериализовать варианты ответов.
 
     Используется исключительно для полей типа 'CHOICE' (выпадающий список).
     """
@@ -32,8 +31,7 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
 
 
 class TemplateFieldSerializer(serializers.ModelSerializer):
-    """
-    Сериализовать поле шаблона анкеты.
+    """Сериализовать поле шаблона анкеты.
 
     Описывает конкретный вопрос, его тип и возможные варианты ответа.
     """
@@ -59,8 +57,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def validate(self, attrs):
-        """
-        Проверить бизнес-логику поля.
+        """Проверить бизнес-логику поля.
 
         Гарантировать, что варианты ответов сохраняются только для поля типа CHOICE.
         Для остальных типов массив очищается. Также проверяет корректность
@@ -156,8 +153,7 @@ class TemplateFieldGroupSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def validate_fields(self, value):
-        """
-        Проверить уникальность порядковых номеров полей внутри группы.
+        """Проверить уникальность порядковых номеров полей внутри группы.
 
         Вызывается автоматически при валидации поля 'fields'.
         """
@@ -171,8 +167,7 @@ class TemplateFieldGroupSerializer(serializers.ModelSerializer):
 
 
 class TemplateSerializer(serializers.ModelSerializer):
-    """
-    Сериализовать шаблон в нормализованную реляционную структуру БД.
+    """Сериализовать шаблон в нормализованную реляционную структуру БД.
 
     Поддерживает вложенную запись групп и полей.
     """
@@ -190,9 +185,11 @@ class TemplateSerializer(serializers.ModelSerializer):
             'id',
             'name',
             'equipment_uid',
+            'article_uid',
             'checklist_type',
             'checklist_type_display',
             'is_draft',
+            'is_fillable',
             'is_deprecated',
             'has_results',
             'created_at',
@@ -213,8 +210,7 @@ class TemplateSerializer(serializers.ModelSerializer):
         return obj.results.exists()
 
     def validate(self, attrs):
-        """
-        Выполнить бизнес-валидацию перед сохранением.
+        """Выполнить бизнес-валидацию перед сохранением.
 
         Защищает используемые шаблоны от изменений и предотвращает
         смену идентичности (UID и Типа).
@@ -230,6 +226,13 @@ class TemplateSerializer(serializers.ModelSerializer):
                     }
                 )
             if (
+                'article_uid' in attrs
+                and attrs['article_uid'] != self.instance.article_uid
+            ):
+                raise serializers.ValidationError(
+                    {'article_uid': 'Нельзя изменить артикул у существующего шаблона.'}
+                )
+            if (
                 'checklist_type' in attrs
                 and attrs['checklist_type'] != self.instance.checklist_type
             ):
@@ -238,12 +241,10 @@ class TemplateSerializer(serializers.ModelSerializer):
                         'checklist_type': 'Нельзя изменить тип чек-листа у существующего шаблона.'
                     }
                 )
-
         return attrs
 
     def validate_groups(self, value):
-        """
-        Проверить уникальность порядковых номеров групп в шаблоне.
+        """Проверить уникальность порядковых номеров групп в шаблоне.
 
         Вызывается автоматически при валидации поля 'groups'.
         """
@@ -256,14 +257,16 @@ class TemplateSerializer(serializers.ModelSerializer):
 
 
 class ChecklistResultCreateSerializer(serializers.Serializer):
-    """
-    Принять и провалидировать заполненную анкету.
+    """Принять и провалидировать заполненную анкету.
 
     Выполняет проверку типов данных (Type Casting) и контроль обязательных полей.
     """
 
     equipment_uid = serializers.CharField(
         max_length=255, write_only=True, required=False
+    )
+    article_uid = serializers.CharField(
+        max_length=255, write_only=True, required=False, allow_null=True
     )
     checklist_type = serializers.CharField(
         max_length=50, write_only=True, required=False
@@ -290,8 +293,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        """
-        Выполнить главную оркестрацию динамической валидации EAV-структуры.
+        """Выполнить главную оркестрацию динамической валидации EAV-структуры.
 
         Шаги:
         1. Получить эталонный шаблон.
@@ -355,25 +357,33 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         return attrs
 
     def _get_active_template(self, attrs):
-        """
-        Извлечь активный шаблон из базы данных.
+        """Извлечь активный шаблон из базы данных.
 
         Raises:
             ValidationError: Если шаблон для указанного оборудования не найден.
         """
         if self.instance:
-            return self.instance.template
+            template = self.instance.template
+        else:
+            template = Template.objects.get_active(
+                attrs.get('equipment_uid'),
+                attrs.get('checklist_type'),
+                attrs.get('article_uid'),
+            )
+            if not template:
+                raise ValidationError(
+                    'Активный шаблон для данного оборудования и артикула не найден.'
+                )
 
-        template = Template.objects.get_active(
-            attrs.get('equipment_uid'), attrs.get('checklist_type')
-        )
-        if not template:
-            raise ValidationError('Активный шаблон для данного оборудования не найден.')
+        if not template.is_fillable:
+            raise ValidationError(
+                'Данный шаблон является справочным документом (Тех. картой) и не предназначен для заполнения.'
+            )
+
         return template
 
     def _process_and_validate_answers(self, template_fields, answers_data, is_draft):
-        """
-        Проверить каждый ответ пользователя через индивидуальный валидатор типов.
+        """Проверить каждый ответ пользователя через индивидуальный валидатор типов.
 
         Returns:
             Список подготовленных словарей с объектами полей и значениями.
@@ -420,8 +430,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         return validated_answers
 
     def _validate_single_field(self, field, value):
-        """
-        Выполнить проверку значения для конкретного типа поля.
+        """Выполнить проверку значения для конкретного типа поля.
 
         Убеждается, что строку можно безопасно конвертировать в целевой тип.
         """
@@ -525,8 +534,7 @@ class ChecklistAttachmentUploadSerializer(serializers.ModelSerializer):
 
 
 class OutputGroupItemSerializer(serializers.Serializer):
-    """
-    Сформировать вспомогательную схему исключительно для Swagger.
+    """Сформировать вспомогательную схему исключительно для Swagger.
 
     Отвечает за отрисовку правильной структуры ответа для групп.
     """
@@ -551,8 +559,7 @@ class ChecklistSignSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        """
-        Проверить возможность подписания анкеты в текущем статусе.
+        """Проверить возможность подписания анкеты в текущем статусе.
 
         Запрещает подпись черновиков, устаревших или закрытых анкет.
         """
@@ -656,4 +663,10 @@ class TemplateCloneSerializer(serializers.Serializer):
     equipment_uid = serializers.CharField(
         max_length=255,
         help_text='UID нового оборудования, для которого создается копия',
+    )
+    article_uid = serializers.CharField(
+        max_length=255,
+        required=False,
+        allow_null=True,
+        help_text='UID нового артикула продукции',
     )

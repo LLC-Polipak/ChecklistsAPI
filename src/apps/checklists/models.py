@@ -12,8 +12,7 @@ from apps.checklists.querysets import ChecklistResultQuerySet, TemplateQuerySet
 
 
 class Template(models.Model):
-    """
-    Главная модель шаблона.
+    """Главная модель шаблона.
 
     Определяет набор полей, которые необходимо заполнить
     при выполнении осмотра, приемки или сдачи оборудования.
@@ -22,11 +21,18 @@ class Template(models.Model):
     name = models.CharField('Название шаблона', max_length=255, default='Без названия')
 
     equipment_uid = models.CharField('UID-оборудования', max_length=36, db_index=True)
+
+    article_uid = models.CharField(
+        'UID Артикула', max_length=50, null=True, blank=True, db_index=True
+    )
+
     checklist_type = models.CharField(
         'Тип чек-листа', max_length=50, choices=ChecklistTypes
     )
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
+
+    is_fillable = models.BooleanField('Доступен для заполнения', default=True)
 
     is_draft = models.BooleanField('Черновик', default=False)
     is_deprecated = models.BooleanField('Устаревший', default=False)
@@ -43,12 +49,12 @@ class Template(models.Model):
             if self.is_deprecated
             else ('[ЧЕРНОВИК] ' if self.is_draft else '')
         )
-        return f'{status}{self.name} ({self.equipment_uid})'
+        target = f'{self.equipment_uid}{f" | Арт: {self.article_uid}" if self.article_uid else ""}'
+        return f'{status}{self.name} ({target})'
 
 
 class TemplateFieldGroup(models.Model):
-    """
-    Модель для группировки полей в шаблоне.
+    """Модель для группировки полей в шаблоне.
 
     Включает в себя ссылку на шаблон, имя группы, а также
     порядок расположения в шаблоне.
@@ -76,8 +82,7 @@ class TemplateFieldGroup(models.Model):
 
 
 class TemplateField(models.Model):
-    """
-    Описание одного поля анкеты.
+    """Описание одного поля анкеты.
 
     Определяет тип данных, обязательность и порядок отображения.
     Для типа CHOICE список значений хранится в FieldChoice.
@@ -117,8 +122,7 @@ class TemplateField(models.Model):
 
 
 class FieldChoice(models.Model):
-    """
-    Допустимое значение для поля типа CHOICE.
+    """Допустимое значение для поля типа CHOICE.
 
     Используется для формирования списка вариантов,
     доступных пользователю при заполнении чек-листа.
@@ -137,13 +141,12 @@ class FieldChoice(models.Model):
         verbose_name_plural = 'Варианты выбора'
 
     def __str__(self):
-        alert = " [⚠️]" if self.is_violation else ""
-        return f"{self.value}{alert}"
+        alert = ' [⚠️]' if self.is_violation else ''
+        return f'{self.value}{alert}'
 
 
 class ChecklistResult(models.Model):
-    """
-    Заполненный экземпляр чек-листа.
+    """Заполненный экземпляр чек-листа.
 
     Содержит информацию о шаблоне, оборудовании, пользователе
     и результатах проверки. Поддерживает версионирование через поле origin.
@@ -196,8 +199,7 @@ class ChecklistResult(models.Model):
 
 
 class ChecklistAnswer(models.Model):
-    """
-    Ответ пользователя на отдельное поле чек-листа.
+    """Ответ пользователя на отдельное поле чек-листа.
 
     Связывает заполненный чек-лист с конкретным полем шаблона.
     """
@@ -247,8 +249,7 @@ class ChecklistSignature(models.Model):
 
 
 class ChecklistAttachment(models.Model):
-    """
-    Медиафайлы, прикрепленные к результату чек-листа.
+    """Медиафайлы, прикрепленные к результату чек-листа.
 
     Хранит фотографии дефектов или сканы документов, загруженные пользователем.
     """

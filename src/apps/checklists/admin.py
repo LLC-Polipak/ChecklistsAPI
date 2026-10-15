@@ -59,7 +59,9 @@ def clone_templates_action(modeladmin, request, queryset):
     count = 0
     for template in queryset:
         new_uid = f'{template.equipment_uid}-COPY-{template.id}'
-        TemplateService.clone_template(template, new_equipment_uid=new_uid)
+        TemplateService.clone_template(
+            template, new_equipment_uid=new_uid, new_article_uid=template.article_uid
+        )
         count += 1
 
     modeladmin.message_user(
@@ -74,8 +76,8 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
     list_display = (
         'id',
         'name',
-        'equipment_uid',
         'checklist_type',
+        'get_is_fillable',
         'get_is_draft',
         'get_is_deprecated',
         'created_at',
@@ -83,12 +85,13 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
     )
     list_filter = (
         'is_draft',
+        'is_fillable',
         'checklist_type',
         'is_deprecated',
         'created_at',
         'updated_at',
     )
-    search_fields = ('name', 'equipment_uid')
+    search_fields = ('name', 'equipment_uid', 'article_uid')
 
     inlines = [TemplateFieldGroupInline]
 
@@ -98,6 +101,15 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
     date_hierarchy = 'created_at'
 
     actions = [clone_templates_action]
+
+    @admin.display(description='Заполнение', ordering='is_fillable')
+    def get_is_fillable(self, obj):
+        """Форматирует отображение статуса возможности заполнения чек-листа по шаблону."""
+        if obj.is_fillable:
+            return format_html('<span style="color: #16A34A;">Доступно</span>')
+        return format_html(
+            '<span style="color: #6B7280; font-style: italic;">Справочник</span>'
+        )
 
     @admin.display(description='Черновик', ordering='is_draft')
     def get_is_draft(self, obj):
@@ -164,8 +176,7 @@ class ChecklistAttachmentInline(admin.TabularInline):
 
 @admin.register(ChecklistResult)
 class ChecklistResultAdmin(admin.ModelAdmin):
-    """
-    Интерфейс администрирования Заполненных Анкет.
+    """Интерфейс администрирования Заполненных Анкет.
 
     Использует raw_id_fields для оптимизации SQL-запросов при большом количестве связей.
     """
@@ -173,7 +184,6 @@ class ChecklistResultAdmin(admin.ModelAdmin):
     list_display = (
         'id',
         'get_template_name',
-        'user_uid',
         'source_service',
         'shift_number',
         'get_is_draft',
@@ -190,12 +200,15 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         'source_service',
         'shift_number',
         'template__checklist_type',
+        'template__article_uid',
         'created_at',
         'updated_at',
     )
     search_fields = (
         'user_uid',
         'template__name',
+        'template__equipment_uid',
+        'template__article_uid',
         'external_id',
         'source_service',
     )

@@ -5,8 +5,7 @@ from django.db.models import Q
 
 
 class TemplateQuerySet(models.QuerySet):
-    """
-    Кастомный набор запросов (QuerySet) для модели Template.
+    """Кастомный набор запросов (QuerySet) для модели Template.
 
     Инкапсулирует базовые SQL-фильтры, позволяя строить читаемые цепочки вызовов.
     """
@@ -23,19 +22,27 @@ class TemplateQuerySet(models.QuerySet):
         """Вернуть только устаревшие (находящиеся в архиве) версии шаблонов."""
         return self.filter(is_deprecated=True)
 
-    def for_equipment(self, equipment_uid: str, checklist_type: str):
-        """
-        Отфильтровать шаблоны по конкретному оборудованию и типу проверки.
+    def for_equipment(
+        self, equipment_uid: str, checklist_type: str, article_uid: str = None
+    ):
+        """Отфильтровать шаблоны по конкретному оборудованию, типу проверки и (опционально) артикулу.
 
         Args:
             equipment_uid: Уникальный идентификатор оборудования.
             checklist_type: Тип чек-листа (например, 'INSPECTION').
+            article_uid: Арктикль продукта (необязателен).
         """
-        return self.filter(equipment_uid=equipment_uid, checklist_type=checklist_type)
+        qs = self.filter(equipment_uid=equipment_uid, checklist_type=checklist_type)
+
+        if article_uid:
+            qs = qs.filter(article_uid=article_uid)
+        else:
+            qs = qs.filter(article_uid__isnull=True)
+
+        return qs
 
     def with_full_hierarchy(self):
-        """
-        Решить проблему N+1 запроса при получении шаблона.
+        """Решить проблему N+1 запроса при получении шаблона.
 
         Предварительно загружает всю иерархию: Группы -> Поля -> Варианты ответов.
         """
@@ -54,8 +61,7 @@ class ChecklistResultQuerySet(models.QuerySet):
         return self.filter(is_deprecated=True)
 
     def related_history(self, origin_id: int):
-        """
-        Найти всю цепочку истории одной анкеты (Оригинал + Все его исправления).
+        """Найти всю цепочку истории одной анкеты (Оригинал + Все его исправления).
 
         Args:
             origin_id: ID самой первой (корневой) версии анкеты.

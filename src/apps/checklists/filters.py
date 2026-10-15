@@ -9,8 +9,7 @@ from apps.checklists.models import ChecklistResult, Template
 
 
 class TemplateFilter(django_filters.FilterSet):
-    """
-    Класс фильтрации для списка шаблонов чек-листов.
+    """Класс фильтрации для списка шаблонов чек-листов.
 
     Обеспечивает поиск по точным совпадениям дат (игнорируя время),
     а также по основным идентификаторам оборудования.
@@ -34,9 +33,11 @@ class TemplateFilter(django_filters.FilterSet):
         model = Template
         fields = [
             'equipment_uid',
+            'article_uid',
             'checklist_type',
             'is_deprecated',
             'is_draft',
+            'is_fillable',
         ]
 
     def filter_end_of_day(self, queryset, name, value):
@@ -46,8 +47,7 @@ class TemplateFilter(django_filters.FilterSet):
 
 
 class ChecklistResultFilter(django_filters.FilterSet):
-    """
-    Класс фильтрации для заполненных анкет (результатов).
+    """Класс фильтрации для заполненных анкет (результатов).
 
     Позволяет фильтровать анкеты по UID оборудования через связанную
     модель шаблона, а также по метаданным заполнения.
@@ -55,6 +55,9 @@ class ChecklistResultFilter(django_filters.FilterSet):
 
     equipment_uid = django_filters.CharFilter(
         field_name='template__equipment_uid', lookup_expr='exact'
+    )
+    article_uid = django_filters.CharFilter(
+        field_name='template__article_uid', lookup_expr='exact'
     )
 
     created_date_from = django_filters.DateFilter(
@@ -76,6 +79,7 @@ class ChecklistResultFilter(django_filters.FilterSet):
         fields = [
             'user_uid',
             'equipment_uid',
+            'article_uid',
             'external_id',
             'source_service',
             'shift_number',
