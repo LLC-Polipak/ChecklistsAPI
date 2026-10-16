@@ -1,5 +1,3 @@
-"""Фильтры для управления поиском в шаблонах и результатах чек-листов."""
-
 from datetime import datetime, time
 
 import django_filters

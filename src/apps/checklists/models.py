@@ -1,5 +1,3 @@
-"""Определение моделей базы данных для системы чек-листов."""
-
 from django.db import models
 
 from apps.checklists.constants import (

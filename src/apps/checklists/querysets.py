@@ -1,5 +1,3 @@
-"""Наборы запросов (QuerySets) для моделей шаблонов и результатов."""
-
 from django.db import models
 from django.db.models import Q
 

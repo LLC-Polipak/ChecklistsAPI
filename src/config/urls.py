@@ -1,5 +1,3 @@
-"""Корневое определение маршрутов URL для проекта."""
-
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -9,6 +7,7 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('_nested_admin/', include('nested_admin.urls')),
     path('api/v1/', include('apps.checklists.urls')),
+    path('api/v1/', include('apps.tech_cards.urls')),
 ]
 
 if settings.DEBUG:

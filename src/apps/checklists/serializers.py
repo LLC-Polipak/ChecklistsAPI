@@ -1,5 +1,3 @@
-"""Сериализаторы для преобразования данных шаблонов и результатов чек-листов."""
-
 import datetime
 
 from drf_spectacular.utils import extend_schema_field

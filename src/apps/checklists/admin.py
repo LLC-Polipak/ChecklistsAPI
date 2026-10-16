@@ -1,5 +1,3 @@
-"""Конфигурация административной панели для управления шаблонами и результатами."""
-
 import nested_admin
 from django.contrib import admin, messages
 from django.db import models

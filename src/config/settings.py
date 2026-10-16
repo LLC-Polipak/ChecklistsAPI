@@ -1,5 +1,3 @@
-"""Настройки конфигурации Django для проекта."""
-
 import os
 from pathlib import Path
 
@@ -27,6 +25,8 @@ INSTALLED_APPS = [
     'drf_spectacular_sidecar',
     'corsheaders',
     'nested_admin',
+    'apps.core',
+    'apps.tech_cards',
     'apps.checklists',
     'apps.users',
 ]

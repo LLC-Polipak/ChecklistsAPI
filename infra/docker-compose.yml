@@ -1,3 +1,5 @@
+name: checklists
+
 services:
   db:
     image: postgres:16.3-alpine

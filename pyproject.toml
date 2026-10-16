@@ -18,6 +18,8 @@ extend-exclude = [
 [tool.ruff.lint]
 ignore = [
     "E501",
+    "D100",
+    "D104",
     "D105",  # Magic methods are self-describing.
     "D106",  # Public nested classes.
     "D107",  # Constructor arguments are described by the class and signature.

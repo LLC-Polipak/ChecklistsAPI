@@ -1,5 +1,3 @@
-"""Представления для API управления шаблонами и результатами чек-листов."""
-
 import os
 
 from django.http import FileResponse
@@ -320,7 +318,7 @@ class ChecklistAttachmentViewSet(
 
     @extend_schema(
         summary='Загрузить прикрепленный файл',
-        description='Загрузка фото/документов к анкете. Обязательно используйте multipart/form-data.',
+        description='Загрузка фото/документов к анкете.',
         request={
             'multipart/form-data': {
                 'type': 'object',

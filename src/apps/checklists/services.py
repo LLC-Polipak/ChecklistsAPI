@@ -1,5 +1,3 @@
-"""Сервисы для управления бизнес-логикой шаблонов и результатов чек-листов."""
-
 import datetime
 
 from django.db import transaction
