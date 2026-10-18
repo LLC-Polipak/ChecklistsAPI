@@ -4,7 +4,27 @@ from django.contrib import admin
 from apps.tech_cards.models import TechCard, TechCardParameter, TechCardSection
 
 
-class TechCardParameterInline(nested_admin.NestedTabularInline):
+class ReadOnlyAdminMixin:
+    """Миксин для отключения любых мутаций данных через админку.
+
+    Заставляет систему использовать исключительно REST API (Сервисный слой)
+    для добавления и изменения данных.
+    """
+
+    def has_add_permission(self, request):
+        """Запрещает добавление документа через админку Django."""
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        """Запрещает редактирование документа через админку Django."""
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        """Запрещает удаление документа через админку Django."""
+        return False
+
+
+class TechCardParameterInline(ReadOnlyAdminMixin, nested_admin.NestedTabularInline):
     """Inline-форма для параметров внутри раздела.
 
     Отображается в виде компактной таблицы (Tabular).
@@ -16,7 +36,7 @@ class TechCardParameterInline(nested_admin.NestedTabularInline):
     ordering = ('order', 'id')
 
 
-class TechCardSectionInline(nested_admin.NestedStackedInline):
+class TechCardSectionInline(ReadOnlyAdminMixin, nested_admin.NestedStackedInline):
     """Inline-форма для разделов внутри технологической карты.
 
     Отображается в виде блоков (Stacked), внутри которых находятся параметры.
@@ -30,7 +50,7 @@ class TechCardSectionInline(nested_admin.NestedStackedInline):
 
 
 @admin.register(TechCard)
-class TechCardAdmin(nested_admin.NestedModelAdmin):
+class TechCardAdmin(ReadOnlyAdminMixin, nested_admin.NestedModelAdmin):
     """Настройка отображения модели TechCard в панели администратора.
 
     Использует nested_admin для вывода и редактирования древовидной
@@ -41,6 +61,7 @@ class TechCardAdmin(nested_admin.NestedModelAdmin):
         'equipment_uid',
         'equipment_seq_num',
         'article',
+        'author_uid',
         'version',
         'status',
         'created_at',
@@ -59,7 +80,7 @@ class TechCardAdmin(nested_admin.NestedModelAdmin):
 
 
 @admin.register(TechCardSection)
-class TechCardSectionAdmin(nested_admin.NestedModelAdmin):
+class TechCardSectionAdmin(ReadOnlyAdminMixin, nested_admin.NestedModelAdmin):
     """Отдельная админка для разделов (на случай, если нужно управлять ими вне карты)."""
 
     list_display = ('name', 'card', 'parent', 'order')
@@ -69,7 +90,7 @@ class TechCardSectionAdmin(nested_admin.NestedModelAdmin):
 
 
 @admin.register(TechCardParameter)
-class TechCardParameterAdmin(admin.ModelAdmin):
+class TechCardParameterAdmin(ReadOnlyAdminMixin, admin.ModelAdmin):
     """Отдельная админка для параметров (удобно для сквозного поиска)."""
 
     list_display = ('name', 'value', 'unit', 'section')
