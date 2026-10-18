@@ -7,3 +7,4 @@ class DocumentStatus(models.TextChoices):
     DRAFT = 'draft', 'Черновик'
     ACTIVE = 'active', 'Активный'
     ARCHIVED = 'archived', 'В архиве'
+    DELETED = 'deleted', 'Удален'

@@ -36,6 +36,10 @@ class AbstractDocument(TimeStampedModel):
         verbose_name='Статус',
     )
 
+    author_uid = models.CharField(
+        max_length=255, blank=True, default='', verbose_name='UID Автора'
+    )
+
     class Meta:
         abstract = True
 

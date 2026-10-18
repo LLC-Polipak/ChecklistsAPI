@@ -33,6 +33,10 @@ class TechCard(AbstractDocument):
                 name='unique_tech_card_version',
             )
         ]
+        indexes = [
+            models.Index(fields=['equipment_uid', 'article', 'status']),
+            models.Index(fields=['status']),
+        ]
 
     def __str__(self) -> str:
         """Возвращает строковое представление Технологической карты."""

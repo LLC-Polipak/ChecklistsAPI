@@ -62,6 +62,8 @@ class TechCardViewSet(
 
         Args:
             request (Request): HTTP-запрос.
+            args: Позиционные аргументы.
+            kwargs: Именованные аргументы.
 
         Returns:
             Response: Пустой ответ со статусом 204 No Content при успехе.

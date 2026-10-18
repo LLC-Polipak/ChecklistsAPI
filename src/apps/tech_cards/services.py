@@ -82,17 +82,18 @@ class TechCardService:
     @classmethod
     @transaction.atomic
     def delete_template(cls, card: TechCard) -> None:
-        """Удаляет актуальный шаблон и восстанавливает предыдущий архивный.
+        """Помечает карту как удаленную и восстанавливает из архива предыдущую версию.
 
         Args:
-            card (TechCard): Карта, которую необходимо удалить.
+            card (TechCard): Карта, подлежащая удалению (Soft Delete).
         """
         equipment_uid = card.equipment_uid
         article = card.article
         equipment_seq_num = card.equipment_seq_num
         was_active = card.status == DocumentStatus.ACTIVE
 
-        card.delete()
+        card.status = DocumentStatus.DELETED
+        card.save(update_fields=['status'])
 
         if was_active:
             previous_card = (
@@ -107,5 +108,5 @@ class TechCardService:
             )
 
             if previous_card:
-                previous_card.status = DocumentStatus.ACTIVE
+                previous_card.status = DocumentStatus.ARCHIVED
                 previous_card.save(update_fields=['status'])
