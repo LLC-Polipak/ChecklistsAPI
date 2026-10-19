@@ -88,17 +88,18 @@ class TechCardSerializer(serializers.ModelSerializer):
                 - Если глубина вложенности превышает порог MAX_DEPTH.
                 - Если суммарное количество разделов превышает порог MAX_SECTIONS.
         """
-        total_sections = [0]
+        total_sections = 0
 
         def _walk_tree(sections: list, current_depth: int):
+            nonlocal total_sections
             if current_depth > MAX_DEPTH:
                 raise serializers.ValidationError(
                     f'Превышена максимальная глубина вложенности разделов (максимум {MAX_DEPTH}).'
                 )
 
             for section in sections:
-                total_sections[0] += 1
-                if total_sections[0] > MAX_SECTIONS:
+                total_sections += 1
+                if total_sections > MAX_SECTIONS:
                     raise serializers.ValidationError(
                         f'Превышено максимальное количество разделов в карте (максимум {MAX_SECTIONS}).'
                     )

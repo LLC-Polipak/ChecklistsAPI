@@ -30,21 +30,30 @@ class TechCardService:
         article = validated_data.get('article')
         equipment_seq_num = validated_data.get('equipment_seq_num', '')
 
-        active_cards = TechCard.objects.filter(
+        card_type = validated_data.get('card_type', 'base')
+        author_uid = validated_data.get('author_uid', '')
+
+        TechCard.objects.filter(
             equipment_uid=equipment_uid,
             article=article,
             equipment_seq_num=equipment_seq_num,
+            card_type=card_type,
+            author_uid=author_uid,
             status=DocumentStatus.ACTIVE,
+        ).update(status='archived')
+
+        max_version = (
+            TechCard.objects.filter(
+                equipment_uid=equipment_uid,
+                article=article,
+                equipment_seq_num=equipment_seq_num,
+                card_type=card_type,
+                author_uid=author_uid,
+            ).aggregate(max_v=Max('version'))['max_v']
+            or 0
         )
-        active_cards.update(status=DocumentStatus.ARCHIVED)
 
-        max_version_aggr = TechCard.objects.filter(
-            equipment_uid=equipment_uid,
-            article=article,
-            equipment_seq_num=equipment_seq_num,
-        ).aggregate(max_v=Max('version'))
-
-        next_version = (max_version_aggr['max_v'] or 0) + 1
+        next_version = max_version + 1
 
         sections_data = validated_data.pop('sections', [])
 
@@ -53,7 +62,6 @@ class TechCardService:
         )
 
         cls._create_sections(new_card, None, sections_data)
-
         return new_card
 
     @classmethod
@@ -87,20 +95,18 @@ class TechCardService:
         Args:
             card (TechCard): Карта, подлежащая удалению (Soft Delete).
         """
-        equipment_uid = card.equipment_uid
-        article = card.article
-        equipment_seq_num = card.equipment_seq_num
         was_active = card.status == DocumentStatus.ACTIVE
-
         card.status = DocumentStatus.DELETED
         card.save(update_fields=['status'])
 
         if was_active:
             previous_card = (
                 TechCard.objects.filter(
-                    equipment_uid=equipment_uid,
-                    article=article,
-                    equipment_seq_num=equipment_seq_num,
+                    equipment_uid=card.equipment_uid,
+                    article=card.article,
+                    equipment_seq_num=card.equipment_seq_num,
+                    card_type=card.card_type,
+                    author_uid=card.author_uid,
                     status=DocumentStatus.ARCHIVED,
                 )
                 .order_by('-version')
@@ -108,5 +114,5 @@ class TechCardService:
             )
 
             if previous_card:
-                previous_card.status = DocumentStatus.ARCHIVED
+                previous_card.status = DocumentStatus.ACTIVE
                 previous_card.save(update_fields=['status'])

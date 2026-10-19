@@ -1,18 +1,24 @@
 import django_filters
 
+from apps.core.constants import DocumentStatus
 from apps.tech_cards.models import TechCard
 
 
 class TechCardFilter(django_filters.FilterSet):
     """Фильтры для технологических карт.
 
-    Позволяет фильтровать по точным совпадениям, частичным вхождениям,
-    диапазонам дат и кастомному статусу архивации.
+    Позволяет гибко искать карты по оборудованию, типу (базовая/персональная),
+    автору и временным диапазонам.
     """
 
     equipment_uid = django_filters.CharFilter(lookup_expr='icontains')
     article = django_filters.CharFilter(lookup_expr='icontains')
     equipment_seq_num = django_filters.CharFilter(lookup_expr='exact')
+
+    card_type = django_filters.ChoiceFilter(
+        choices=[('base', 'Базовая'), ('personal', 'Персональная')]
+    )
+    author_uid = django_filters.CharFilter(lookup_expr='exact')
 
     created_after = django_filters.DateTimeFilter(
         field_name='created_at', lookup_expr='gte'
@@ -46,7 +52,7 @@ class TechCardFilter(django_filters.FilterSet):
             QuerySet: Отфильтрованный набор данных.
         """
         if value is True:
-            return queryset.filter(status='archived')
+            return queryset.filter(status=DocumentStatus.ARCHIVED)
         if value is False:
-            return queryset.filter(status='active')
+            return queryset.filter(status=DocumentStatus.ACTIVE)
         return queryset

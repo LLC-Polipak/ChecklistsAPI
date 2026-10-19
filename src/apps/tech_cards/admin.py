@@ -51,30 +51,38 @@ class TechCardSectionInline(ReadOnlyAdminMixin, nested_admin.NestedStackedInline
 
 @admin.register(TechCard)
 class TechCardAdmin(ReadOnlyAdminMixin, nested_admin.NestedModelAdmin):
-    """Настройка отображения модели TechCard в панели администратора.
+    """Отображение модели Технологической карты в панели администратора.
 
-    Использует nested_admin для вывода и редактирования древовидной
-    структуры 'Карта -> Разделы -> Параметры' на одной странице.
+    Обеспечивает вывод полного дерева документа (Карта -> Разделы -> Параметры)
+    с возможностью управления версиями, статусами и просмотра авторов.
     """
 
     list_display = (
         'equipment_uid',
-        'equipment_seq_num',
         'article',
-        'author_uid',
+        'equipment_seq_num',
+        'card_type',
         'version',
         'status',
+        'author_uid',
         'created_at',
     )
-    list_filter = ('status', 'equipment_uid', 'article')
+    list_filter = ('status', 'card_type', 'equipment_uid', 'article')
 
-    search_fields = ('equipment_uid', 'article', 'equipment_seq_num')
+    search_fields = ('equipment_uid', 'article', 'equipment_seq_num', 'author_uid')
     readonly_fields = ('created_at', 'updated_at')
 
     inlines = [TechCardSectionInline]
 
     def get_queryset(self, request):
-        """Оптимизация запросов для списка объектов в админке."""
+        """Переопределяет базовый QuerySet для оптимизации запросов админки.
+
+        Args:
+            request (HttpRequest): HTTP-запрос.
+
+        Returns:
+            QuerySet: Оптимизированный набор данных с подгруженными связями.
+        """
         qs = super().get_queryset(request)
         return qs.prefetch_related('sections')
 

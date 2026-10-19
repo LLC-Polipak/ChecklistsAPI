@@ -1,6 +1,7 @@
 from django.db import models
 
 from apps.core.models import AbstractDocument, AbstractParameter, AbstractSection
+from apps.tech_cards.constants import CardType
 from apps.tech_cards.managers import TechCardManager
 
 
@@ -18,10 +19,13 @@ class TechCard(AbstractDocument):
 
     objects = TechCardManager()
 
-    equipment_uid = models.CharField(max_length=100, verbose_name='UID Оборудования')
+    equipment_uid = models.CharField(max_length=50, verbose_name='UID Оборудования')
     article = models.CharField(max_length=150, verbose_name='Артикул')
     equipment_seq_num = models.CharField(
         max_length=50, blank=True, default='', verbose_name='Порядковый номер'
+    )
+    card_type = models.CharField(
+        max_length=20, choices=CardType, default=CardType.BASE, verbose_name='Тип карты'
     )
 
     class Meta:
@@ -29,13 +33,21 @@ class TechCard(AbstractDocument):
         verbose_name_plural = 'Технологические карты'
         constraints = [
             models.UniqueConstraint(
-                fields=['equipment_uid', 'article', 'equipment_seq_num', 'version'],
+                fields=[
+                    'equipment_uid',
+                    'article',
+                    'equipment_seq_num',
+                    'card_type',
+                    'author_uid',
+                    'version',
+                ],
                 name='unique_tech_card_version',
             )
         ]
         indexes = [
-            models.Index(fields=['equipment_uid', 'article', 'status']),
-            models.Index(fields=['status']),
+            models.Index(
+                fields=['equipment_uid', 'article', 'status', 'card_type', 'author_uid']
+            ),
         ]
 
     def __str__(self) -> str:

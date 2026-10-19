@@ -1,5 +1,6 @@
 from django.db import models
 
+from apps.core.constants import DocumentStatus
 from apps.tech_cards.querysets import TechCardQuerySet
 
 
@@ -18,10 +19,18 @@ class TechCardManager(models.Manager):
         """Прокси-метод для получения активных карт."""
         return self.get_queryset().active()
 
-    def drafts(self) -> TechCardQuerySet:
-        """Прокси-метод для получения черновиков."""
-        return self.get_queryset().drafts()
+    def archived(self) -> TechCardQuerySet:
+        """Прокси-метод для получения архивных карт."""
+        return self.get_queryset().archived()
 
     def with_full_hierarchy(self) -> TechCardQuerySet:
         """Прокси-метод для получения карт с подгруженной иерархией."""
         return self.get_queryset().with_full_hierarchy()
+
+    def available_for(
+        self,
+        operator_uid: str = None,
+        status_filter: DocumentStatus = DocumentStatus.ACTIVE,
+    ) -> TechCardQuerySet:
+        """Прокси-метод для получения базовой карты и личной карты оператора."""
+        return self.get_queryset().available_for(operator_uid, status_filter)

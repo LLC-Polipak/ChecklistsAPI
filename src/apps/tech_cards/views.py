@@ -16,11 +16,11 @@ class TechCardViewSet(
     mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
-    """API для управления технологическими картами.
+    """Контроллер для работы с технологическими картами.
 
-    Поддерживает строгую парадигму версионирования.
-    Методы PUT и PATCH отключены на уровне архитектуры. Любое обновление
-    данных должно происходить через POST (создание новой версии).
+    Обеспечивает строгое версионирование: изменение данных происходит
+    только через добавление новой версии (POST), а удаление (DELETE)
+    использует механизм Soft Delete с откатом версий.
     """
 
     serializer_class = TechCardSerializer
@@ -39,26 +39,29 @@ class TechCardViewSet(
     ordering = ['-created_at']
 
     def get_queryset(self):
-        """Возвращает базовый QuerySet с подгруженной иерархией.
+        """Формирует набор данных на основе параметров запроса.
 
-        По умолчанию (если клиент не запросил явно is_archived)
-        оставляем только активные шаблоны, чтобы не засорять выдачу.
+        Извлекает параметры статуса и UID оператора, передавая их
+        в кастомный QuerySet для применения бизнес-логики изоляции карт.
 
         Returns:
-            QuerySet: Оптимизированный набор карт.
+            QuerySet: Оптимизированный и отфильтрованный набор карт.
         """
-        queryset = TechCard.objects.with_full_hierarchy()
+        status_filter = DocumentStatus.ACTIVE
 
-        if self.action == 'list':
-            return queryset.filter(status=DocumentStatus.ACTIVE)
+        if self.request.query_params.get('is_archived') == 'true':
+            status_filter = DocumentStatus.ARCHIVED
 
-        return queryset
+        operator_uid = self.request.query_params.get('current_operator_uid')
+
+        return TechCard.objects.available_for(
+            operator_uid=operator_uid, status_filter=status_filter
+        ).order_by('-created_at')
 
     def destroy(self, request, *args, **kwargs) -> Response:
-        """Удаляет технологическую карту с применением бизнес-логики.
+        """Выполняет мягкое удаление карты с откатом версии.
 
-        Полностью переопределяет базовый метод для явного вызова сервисного
-        слоя и самостоятельного формирования HTTP-ответа.
+        Переопределяет стандартный метод удаления DRF для вызова сервисного слоя.
 
         Args:
             request (Request): HTTP-запрос.
@@ -66,7 +69,7 @@ class TechCardViewSet(
             kwargs: Именованные аргументы.
 
         Returns:
-            Response: Пустой ответ со статусом 204 No Content при успехе.
+            Response: Ответ со статусом 204 No Content.
         """
         instance = self.get_object()
 
