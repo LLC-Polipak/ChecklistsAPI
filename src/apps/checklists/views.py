@@ -46,7 +46,7 @@ class TemplateViewSet(viewsets.ModelViewSet):
     ]
     filterset_class = TemplateFilter
 
-    search_fields = ['equipment_uid', 'article_uid', 'name', 'groups__fields__name']
+    search_fields = ['equipment_uid', 'name', 'groups__fields__name']
     ordering_fields = ['created_at', 'updated_at']
     ordering = ['-created_at']
 
@@ -136,15 +136,11 @@ class TemplateViewSet(viewsets.ModelViewSet):
         serializer = TemplateCloneSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_uid = serializer.validated_data['equipment_uid']
-        new_article = serializer.validated_data.get(
-            'article_uid', original_template.article_uid
-        )
 
         try:
             new_template = TemplateService.clone_template(
                 original_template,
                 new_equipment_uid=new_uid,
-                new_article_uid=new_article,
             )
         except ValidationError as e:
             return Response(
@@ -176,7 +172,6 @@ class ChecklistResultViewSet(viewsets.ModelViewSet):
     search_fields = [
         'user_uid',
         'template__equipment_uid',
-        'template__article_uid',
         'template__name',
         'answers__value',
         'answers__comment',

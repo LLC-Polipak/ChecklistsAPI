@@ -11,6 +11,7 @@ from apps.checklists.models import (
     ChecklistResult,
     ChecklistSignature,
     FieldChoice,
+    QualityControlMetadata,
     Template,
     TemplateField,
     TemplateFieldGroup,
@@ -41,7 +42,6 @@ class TemplateService:
             Template.objects.deprecate_all(
                 validated_data.get('equipment_uid'),
                 validated_data.get('checklist_type'),
-                validated_data.get('article_uid'),
             )
 
         template = Template.objects.create(**validated_data)
@@ -62,7 +62,6 @@ class TemplateService:
         if instance.results.exists():
             new_data = {
                 'equipment_uid': instance.equipment_uid,
-                'article_uid': instance.article_uid,
                 'checklist_type': instance.checklist_type,
                 'name': validated_data.get('name', instance.name),
                 'is_draft': validated_data.get('is_draft', instance.is_draft),
@@ -76,7 +75,6 @@ class TemplateService:
                 Template.objects.deprecate_all(
                     new_data['equipment_uid'],
                     new_data['checklist_type'],
-                    new_data['article_uid'],
                 )
 
             new_template = Template.objects.create(**new_data)
@@ -99,7 +97,6 @@ class TemplateService:
             Template.objects.deprecate_all(
                 instance.equipment_uid,
                 instance.checklist_type,
-                instance.article_uid,
                 exclude_id=instance.id,
             )
 
@@ -123,33 +120,26 @@ class TemplateService:
         """
         eq_uid = instance.equipment_uid
         c_type = instance.checklist_type
-        art_uid = instance.article_uid
 
         instance.delete()
-        Template.objects.restore_latest_deprecated(eq_uid, c_type, art_uid)
+        Template.objects.restore_latest_deprecated(eq_uid, c_type)
 
     @classmethod
     @transaction.atomic
-    def clone_template(
-        cls, instance: Template, new_equipment_uid: str, new_article_uid: str = None
-    ) -> Template:
+    def clone_template(cls, instance: Template, new_equipment_uid: str) -> Template:
         """Бизнес-логика клонирования шаблона.
 
         Выполняет глубокое копирование (Deep Copy) всех групп, полей и вариантов.
         Клон всегда создается в статусе "Черновик" для безопасной проверки администратором.
         """
-        if (
-            instance.equipment_uid == new_equipment_uid
-            and instance.article_uid == new_article_uid
-        ):
+        if instance.equipment_uid == new_equipment_uid:
             raise ValidationError(
-                'Новая связка "Оборудование + Артикул" должна отличаться от оригинальной.'
+                'Новый UID оборудования должен быть оригинальным.'
             )
 
         new_template = Template.objects.create(
             name=f'{instance.name} (Копия)',
             equipment_uid=new_equipment_uid,
-            article_uid=new_article_uid,
             checklist_type=instance.checklist_type,
             is_fillable=instance.is_fillable,
             is_draft=False,
@@ -216,6 +206,7 @@ class ChecklistResultService:
         Составитель анкеты автоматически подписывает документ ролью AUTHOR.
         """
         answers_data = validated_data.pop('validated_answers')
+        qc_metadata_data = validated_data.pop('qc_metadata', None)
 
         validated_data.pop('answers', None)
         validated_data.pop('equipment_uid', None)
@@ -225,6 +216,9 @@ class ChecklistResultService:
 
         cls._save_answers(result, answers_data)
         cls._upsert_signature(result, 'AUTHOR', result.user_uid)
+
+        if qc_metadata_data:
+            QualityControlMetadata.objects.create(result=result, **qc_metadata_data)
 
         return result
 
@@ -242,6 +236,7 @@ class ChecklistResultService:
         3. Все существующие подписи переносятся на новую версию анкеты.
         """
         answers_data = validated_data.pop('validated_answers')
+        qc_metadata_data = validated_data.pop('qc_metadata', None)
 
         validated_data.pop('answers', None)
         validated_data.pop('equipment_uid', None)
@@ -252,6 +247,16 @@ class ChecklistResultService:
         validated_data['origin'] = instance.origin if instance.origin else instance
         new_result = ChecklistResult.objects.create(**validated_data)
         cls._save_answers(new_result, answers_data)
+
+        if qc_metadata_data:
+            QualityControlMetadata.objects.create(result=new_result, **qc_metadata_data)
+        elif hasattr(instance, 'qc_metadata'):
+            old_meta = instance.qc_metadata
+            QualityControlMetadata.objects.create(
+                result=new_result,
+                material_uid=old_meta.material_uid,
+                number_of_samples=old_meta.number_of_samples,
+            )
 
         for old_sig in instance.signatures.all():
             cls._upsert_signature(new_result, old_sig.role, old_sig.user_uid)
@@ -352,11 +357,11 @@ class ChecklistResultService:
             return False
 
         handlers = {
-            'CHECKBOX': cls._is_bool_violation,
-            'RADIO': cls._is_bool_violation,
-            'NUMBER': cls._is_numeric_violation,
-            'DATE': cls._is_date_violation,
-            'AUTO_DATE': cls._is_date_violation,
+            FieldTypes.CHECKBOX: cls._is_bool_violation,
+            FieldTypes.RADIO: cls._is_bool_violation,
+            FieldTypes.INTEGER: cls._is_numeric_violation,
+            FieldTypes.DATE: cls._is_date_violation,
+            FieldTypes.AUTO_DATE: cls._is_date_violation,
         }
 
         handler = handlers.get(field.field_type)

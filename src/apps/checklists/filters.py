@@ -31,7 +31,6 @@ class TemplateFilter(django_filters.FilterSet):
         model = Template
         fields = [
             'equipment_uid',
-            'article_uid',
             'checklist_type',
             'is_deprecated',
             'is_draft',
@@ -54,8 +53,8 @@ class ChecklistResultFilter(django_filters.FilterSet):
     equipment_uid = django_filters.CharFilter(
         field_name='template__equipment_uid', lookup_expr='exact'
     )
-    article_uid = django_filters.CharFilter(
-        field_name='template__article_uid', lookup_expr='exact'
+    material_uid = django_filters.CharFilter(
+        field_name='qc_metadata__material_uid', lookup_expr='exact'
     )
 
     created_date_from = django_filters.DateFilter(
@@ -77,7 +76,6 @@ class ChecklistResultFilter(django_filters.FilterSet):
         fields = [
             'user_uid',
             'equipment_uid',
-            'article_uid',
             'external_id',
             'source_service',
             'shift_number',

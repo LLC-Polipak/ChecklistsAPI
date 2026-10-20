@@ -20,24 +20,14 @@ class TemplateQuerySet(models.QuerySet):
         """Вернуть только устаревшие (находящиеся в архиве) версии шаблонов."""
         return self.filter(is_deprecated=True)
 
-    def for_equipment(
-        self, equipment_uid: str, checklist_type: str, article_uid: str = None
-    ):
+    def for_equipment(self, equipment_uid: str, checklist_type: str):
         """Отфильтровать шаблоны по конкретному оборудованию, типу проверки и (опционально) артикулу.
 
         Args:
             equipment_uid: Уникальный идентификатор оборудования.
             checklist_type: Тип чек-листа (например, 'INSPECTION').
-            article_uid: Арктикль продукта (необязателен).
         """
-        qs = self.filter(equipment_uid=equipment_uid, checklist_type=checklist_type)
-
-        if article_uid:
-            qs = qs.filter(article_uid=article_uid)
-        else:
-            qs = qs.filter(article_uid__isnull=True)
-
-        return qs
+        return self.filter(equipment_uid=equipment_uid, checklist_type=checklist_type)
 
     def with_full_hierarchy(self):
         """Решить проблему N+1 запроса при получении шаблона.
@@ -68,6 +58,6 @@ class ChecklistResultQuerySet(models.QuerySet):
 
     def with_full_hierarchy(self):
         """Оптимизировать SQL-запросы, загружая связанные ответы, поля и подписи."""
-        return self.select_related('template').prefetch_related(
+        return self.select_related('template', 'qc_metadata').prefetch_related(
             'answers__field', 'signatures'
         )

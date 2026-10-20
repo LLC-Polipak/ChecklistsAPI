@@ -57,9 +57,7 @@ def clone_templates_action(modeladmin, request, queryset):
     count = 0
     for template in queryset:
         new_uid = f'{template.equipment_uid}-COPY-{template.id}'
-        TemplateService.clone_template(
-            template, new_equipment_uid=new_uid, new_article_uid=template.article_uid
-        )
+        TemplateService.clone_template(template, new_equipment_uid=new_uid)
         count += 1
 
     modeladmin.message_user(
@@ -89,7 +87,7 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
         'created_at',
         'updated_at',
     )
-    search_fields = ('name', 'equipment_uid', 'article_uid')
+    search_fields = ('name', 'equipment_uid')
 
     inlines = [TemplateFieldGroupInline]
 
@@ -198,7 +196,6 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         'source_service',
         'shift_number',
         'template__checklist_type',
-        'template__article_uid',
         'created_at',
         'updated_at',
     )
@@ -206,7 +203,6 @@ class ChecklistResultAdmin(admin.ModelAdmin):
         'user_uid',
         'template__name',
         'template__equipment_uid',
-        'template__article_uid',
         'external_id',
         'source_service',
     )

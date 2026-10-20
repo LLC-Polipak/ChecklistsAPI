@@ -20,10 +20,6 @@ class Template(models.Model):
 
     equipment_uid = models.CharField('UID-оборудования', max_length=36, db_index=True)
 
-    article_uid = models.CharField(
-        'UID Артикула', max_length=50, null=True, blank=True, db_index=True
-    )
-
     checklist_type = models.CharField(
         'Тип чек-листа', max_length=50, choices=ChecklistTypes
     )
@@ -47,8 +43,7 @@ class Template(models.Model):
             if self.is_deprecated
             else ('[ЧЕРНОВИК] ' if self.is_draft else '')
         )
-        target = f'{self.equipment_uid}{f" | Арт: {self.article_uid}" if self.article_uid else ""}'
-        return f'{status}{self.name} ({target})'
+        return f'{status}{self.name} ({self.equipment_uid})'
 
 
 class TemplateFieldGroup(models.Model):
@@ -266,3 +261,30 @@ class ChecklistAttachment(models.Model):
 
     def __str__(self):
         return f'Вложение к анкете {self.result_id} ({self.file.name})'
+
+
+class QualityControlMetadata(models.Model):
+    """Метаданные, специфичные для листов контроля качества (ПКК).
+
+    Хранит информацию о конкретной партии материала и объеме выборки,
+    привязываясь к результату проверки через отношение OneToOne.
+    """
+
+    result = models.OneToOneField(
+        'ChecklistResult',
+        on_delete=models.CASCADE,
+        related_name='qc_metadata',
+        verbose_name='Результат проверки',
+    )
+    material_uid = models.CharField(
+        'UID Материала / Партии', max_length=255, db_index=True
+    )
+    number_of_samples = models.PositiveIntegerField('Количество образцов', default=1)
+
+    class Meta:
+        verbose_name = 'Метаданные контроля качества'
+        verbose_name_plural = 'Метаданные контроля качества'
+
+    def __str__(self) -> str:
+        """Возвращает строковое представление метаданных ПКК."""
+        return f'ПКК (Материал: {self.material_uid}, Образцов: {self.number_of_samples}) к анкете {self.result_id}'
