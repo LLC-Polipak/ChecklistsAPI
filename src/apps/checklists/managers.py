@@ -8,7 +8,9 @@ class TemplateManager(models.Manager):
     скрывая детали реализации фильтрации.
     """
 
-    def get_active(self, equipment_uid: str, checklist_type: str):
+    def get_active(
+        self, equipment_uid: str, checklist_type: str, material_uid: str = None
+    ):
         """Найти актуальный шаблон для заполнения анкеты.
 
         Returns:
@@ -17,7 +19,7 @@ class TemplateManager(models.Manager):
         return (
             self.get_queryset()
             .active()
-            .for_equipment(equipment_uid, checklist_type)
+            .for_equipment(equipment_uid, checklist_type, material_uid)
             .with_full_hierarchy()
             .first()
         )
@@ -26,18 +28,25 @@ class TemplateManager(models.Manager):
         self,
         equipment_uid: str,
         checklist_type: str,
+        material_uid: str = None,
         exclude_id: int = None,
     ):
         """Мягко удалить (Soft Delete) все активные шаблоны указанного типа.
 
         Используется при создании новой версии шаблона для сохранения историчности.
         """
-        qs = self.get_queryset().active().for_equipment(equipment_uid, checklist_type)
+        qs = (
+            self.get_queryset()
+            .active()
+            .for_equipment(equipment_uid, checklist_type, material_uid)
+        )
         if exclude_id:
             qs = qs.exclude(id=exclude_id)
         qs.update(is_deprecated=True)
 
-    def restore_latest_deprecated(self, equipment_uid: str, checklist_type: str):
+    def restore_latest_deprecated(
+        self, equipment_uid: str, checklist_type: str, material_uid: str = None
+    ):
         """Выполнить откат удаления (Rollback).
 
         Если активных шаблонов не осталось, находит самую свежую
@@ -46,7 +55,7 @@ class TemplateManager(models.Manager):
         active_exists = (
             self.get_queryset()
             .active()
-            .for_equipment(equipment_uid, checklist_type)
+            .for_equipment(equipment_uid, checklist_type, material_uid)
             .exists()
         )
 
@@ -54,7 +63,7 @@ class TemplateManager(models.Manager):
             latest = (
                 self.get_queryset()
                 .deprecated()
-                .for_equipment(equipment_uid, checklist_type)
+                .for_equipment(equipment_uid, checklist_type, material_uid)
                 .order_by('-created_at')
                 .first()
             )
@@ -63,11 +72,13 @@ class TemplateManager(models.Manager):
                 latest.is_deprecated = False
                 latest.save(update_fields=['is_deprecated'])
 
-    def get_history(self, equipment_uid: str, checklist_type: str):
+    def get_history(
+        self, equipment_uid: str, checklist_type: str, material_uid: str = None
+    ):
         """Вернуть хронологическую историю всех версий шаблона."""
         return (
             self.get_queryset()
-            .for_equipment(equipment_uid, checklist_type)
+            .for_equipment(equipment_uid, checklist_type, material_uid)
             .with_full_hierarchy()
             .order_by('-created_at')
         )

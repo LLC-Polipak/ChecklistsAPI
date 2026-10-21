@@ -9,13 +9,12 @@ class ChecklistTypes(models.TextChoices):
     - ACCEPTANCE: Приемка оборудования перед началом работы.
     - HANDOVER: Сдача оборудования после завершения смены или этапа работ.
     - TECH_CARD: Технологическая карта (контроль качества).
-    - QUALITY_CONTROL: Лист контроля качества (ПКК).
     """
 
     INSPECTION = 'INSPECTION', 'Осмотр'
     ACCEPTANCE = 'ACCEPTANCE', 'Приемка'
     HANDOVER = 'HANDOVER', 'Сдача'
-    QUALITY_CONTROL = 'QUALITY_CONTROL', 'Контроль качества (ПКК)'
+    QUALITY_CONTROL = 'QUALITY_CONTROL', 'Контроль качества (ЛКК)'
 
 
 class FieldTypes(models.TextChoices):

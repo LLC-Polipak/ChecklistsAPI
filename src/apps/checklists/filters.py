@@ -13,6 +13,10 @@ class TemplateFilter(django_filters.FilterSet):
     а также по основным идентификаторам оборудования.
     """
 
+    material_uid = django_filters.CharFilter(
+        field_name='qc_metadata__material_uid', lookup_expr='exact'
+    )
+
     created_date_from = django_filters.DateFilter(
         field_name='created_at', lookup_expr='gte', label='Создано с (Дата)'
     )
@@ -31,6 +35,7 @@ class TemplateFilter(django_filters.FilterSet):
         model = Template
         fields = [
             'equipment_uid',
+            'material_uid',
             'checklist_type',
             'is_deprecated',
             'is_draft',
@@ -52,9 +57,6 @@ class ChecklistResultFilter(django_filters.FilterSet):
 
     equipment_uid = django_filters.CharFilter(
         field_name='template__equipment_uid', lookup_expr='exact'
-    )
-    material_uid = django_filters.CharFilter(
-        field_name='qc_metadata__material_uid', lookup_expr='exact'
     )
 
     created_date_from = django_filters.DateFilter(

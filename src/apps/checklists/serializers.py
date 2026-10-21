@@ -11,10 +11,10 @@ from apps.checklists.models import (
     ChecklistResult,
     ChecklistSignature,
     FieldChoice,
-    QualityControlMetadata,
     Template,
     TemplateField,
     TemplateFieldGroup,
+    TemplateQCMetadata,
 )
 
 
@@ -165,6 +165,19 @@ class TemplateFieldGroupSerializer(serializers.ModelSerializer):
         return value
 
 
+class TemplateQCMetadataSerializer(serializers.ModelSerializer):
+    """Сериализатор метаданных шаблона контроля качества (ПКК).
+
+    Отвечает за валидацию и представление привязки шаблона к конкретному
+    материалу, а также за указание необходимого количества образцов для проверки.
+    Используется как вложенное поле в сериализаторе шаблона.
+    """
+
+    class Meta:
+        model = TemplateQCMetadata
+        fields = ['material_uid', 'number_of_samples']
+
+
 class TemplateSerializer(serializers.ModelSerializer):
     """Сериализовать шаблон в нормализованную реляционную структуру БД.
 
@@ -175,6 +188,8 @@ class TemplateSerializer(serializers.ModelSerializer):
     checklist_type_display = serializers.CharField(
         source='get_checklist_type_display', read_only=True
     )
+
+    qc_metadata = TemplateQCMetadataSerializer(required=False, allow_null=True)
 
     has_results = serializers.SerializerMethodField()
 
@@ -193,6 +208,7 @@ class TemplateSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'groups',
+            'qc_metadata',
         ]
         read_only_fields = [
             'id',
@@ -232,6 +248,32 @@ class TemplateSerializer(serializers.ModelSerializer):
                         'checklist_type': 'Нельзя изменить тип чек-листа у существующего шаблона.'
                     }
                 )
+            if 'qc_metadata' in attrs and attrs['qc_metadata'] is not None:
+                new_material = attrs['qc_metadata'].get('material_uid')
+                if (
+                    hasattr(self.instance, 'qc_metadata')
+                    and new_material != self.instance.qc_metadata.material_uid
+                ):
+                    raise serializers.ValidationError(
+                        {
+                            'qc_metadata': 'Нельзя изменить материал у существующего шаблона ПКК.'
+                        }
+                    )
+
+        checklist_type = attrs.get(
+            'checklist_type', self.instance.checklist_type if self.instance else None
+        )
+        qc_metadata = attrs.get('qc_metadata')
+
+        if checklist_type == ChecklistTypes.QUALITY_CONTROL:
+            if not qc_metadata or not qc_metadata.get('material_uid'):
+                raise serializers.ValidationError(
+                    {
+                        'qc_metadata': 'Для шаблона Листа контроля качества (ПКК) обязательно указание material_uid.'
+                    }
+                )
+        else:
+            attrs['qc_metadata'] = None
         return attrs
 
     def validate_groups(self, value):
@@ -247,17 +289,6 @@ class TemplateSerializer(serializers.ModelSerializer):
         return value
 
 
-class QCMetadataSerializer(serializers.ModelSerializer):
-    """Сериализатор для метаданных контроля качества (ПКК).
-
-    Используется для валидации и вывода material_uid и number_of_samples.
-    """
-
-    class Meta:
-        model = QualityControlMetadata
-        fields = ['material_uid', 'number_of_samples']
-
-
 class ChecklistResultCreateSerializer(serializers.Serializer):
     """Принять и провалидировать заполненную анкету.
 
@@ -269,6 +300,9 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     )
     checklist_type = serializers.CharField(
         max_length=50, write_only=True, required=False
+    )
+    material_uid = serializers.CharField(
+        max_length=255, write_only=True, required=False, allow_null=True
     )
 
     user_uid = serializers.CharField(max_length=36)
@@ -283,8 +317,6 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
 
     groups = AnswerGroupSerializer(many=True, allow_empty=True)
 
-    qc_metadata = QCMetadataSerializer(required=False, allow_null=True)
-
     general_comment = serializers.CharField(
         allow_blank=True, required=False, default=''
     )
@@ -293,14 +325,13 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         max_length=100, required=False, allow_null=True
     )
 
-    def validate(self, attrs): #noqa C901
+    def validate(self, attrs):
         """Выполнить главную оркестрацию динамической валидации EAV-структуры.
 
         Шаги:
         1. Получить эталонный шаблон.
-        2. Проверить наличие qc_metadata, если шаблон имеет тип QUALITY_CONTROL.
-        3. Проверить отсутствие пропущенных обязательных полей.
-        4. Запустить проверку типов данных для каждого ответа.
+        2. Проверить отсутствие пропущенных обязательных полей.
+        3. Запустить проверку типов данных для каждого ответа.
         """
         groups_data = attrs.get('groups', [])
         is_draft = attrs.get('is_draft', False)
@@ -313,17 +344,6 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 attrs['is_completed'] = True
 
         template = self._get_active_template(attrs)
-
-        qc_metadata = attrs.get('qc_metadata')
-        if template.checklist_type == ChecklistTypes.QUALITY_CONTROL:
-            if not qc_metadata or not qc_metadata.get('material_uid'):
-                raise ValidationError(
-                    {
-                        'qc_metadata': 'Для листов контроля качества обязательно нужно указать material_uid и number_of_samples.'
-                    }
-                )
-        else:
-            attrs['qc_metadata'] = None
 
         template_fields = {}
         for group in template.groups.all():
@@ -364,6 +384,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         attrs.pop('groups', None)
         attrs.pop('equipment_uid', None)
         attrs.pop('checklist_type', None)
+        attrs.pop('material_uid', None)
 
         attrs['template'] = template
         attrs['validated_answers'] = validated_answers
@@ -381,15 +402,16 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
             template = Template.objects.get_active(
                 attrs.get('equipment_uid'),
                 attrs.get('checklist_type'),
+                attrs.get('material_uid'),
             )
             if not template:
                 raise ValidationError(
-                    'Активный шаблон для данного оборудования не найден.'
+                    'Активный шаблон для данного оборудования и материала не найден.'
                 )
 
         if not template.is_fillable:
             raise ValidationError(
-                'Данный шаблон является справочным документом (Тех. картой) и не предназначен для заполнения.'
+                'Данный шаблон является справочным документом и не предназначен для заполнения.'
             )
 
         return template
@@ -620,8 +642,6 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     groups = serializers.SerializerMethodField()
     attachments = ChecklistAttachmentSerializer(many=True, read_only=True)
 
-    qc_metadata = QCMetadataSerializer(read_only=True, allow_null=True)
-
     class Meta:
         model = ChecklistResult
         fields = [
@@ -645,7 +665,6 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'signatures',
             'groups',
             'attachments',
-            'qc_metadata',
         ]
 
     @extend_schema_field(OutputGroupItemSerializer(many=True))

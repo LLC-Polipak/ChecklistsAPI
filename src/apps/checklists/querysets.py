@@ -20,21 +20,33 @@ class TemplateQuerySet(models.QuerySet):
         """Вернуть только устаревшие (находящиеся в архиве) версии шаблонов."""
         return self.filter(is_deprecated=True)
 
-    def for_equipment(self, equipment_uid: str, checklist_type: str):
-        """Отфильтровать шаблоны по конкретному оборудованию, типу проверки и (опционально) артикулу.
+    def for_equipment(
+        self, equipment_uid: str, checklist_type: str, material_uid: str = None
+    ):
+        """Отфильтровать шаблоны по конкретному оборудованию, типу проверки и (опционально) материалу.
 
         Args:
             equipment_uid: Уникальный идентификатор оборудования.
             checklist_type: Тип чек-листа (например, 'INSPECTION').
+            material_uid: Уникальный идентификатор материала.
         """
-        return self.filter(equipment_uid=equipment_uid, checklist_type=checklist_type)
+        qs = self.filter(equipment_uid=equipment_uid, checklist_type=checklist_type)
+
+        if material_uid:
+            qs = qs.filter(qc_metadata__material_uid=material_uid)
+        else:
+            qs = qs.filter(qc_metadata__isnull=True)
+
+        return qs
 
     def with_full_hierarchy(self):
         """Решить проблему N+1 запроса при получении шаблона.
 
         Предварительно загружает всю иерархию: Группы -> Поля -> Варианты ответов.
         """
-        return self.prefetch_related('groups__fields__choices')
+        return self.select_related('qc_metadata').prefetch_related(
+            'groups__fields__choices'
+        )
 
 
 class ChecklistResultQuerySet(models.QuerySet):
@@ -58,6 +70,6 @@ class ChecklistResultQuerySet(models.QuerySet):
 
     def with_full_hierarchy(self):
         """Оптимизировать SQL-запросы, загружая связанные ответы, поля и подписи."""
-        return self.select_related('template', 'qc_metadata').prefetch_related(
+        return self.select_related('template').prefetch_related(
             'answers__field', 'signatures'
         )

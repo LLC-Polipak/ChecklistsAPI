@@ -263,18 +263,18 @@ class ChecklistAttachment(models.Model):
         return f'Вложение к анкете {self.result_id} ({self.file.name})'
 
 
-class QualityControlMetadata(models.Model):
-    """Метаданные, специфичные для листов контроля качества (ПКК).
+class TemplateQCMetadata(models.Model):
+    """Метаданные, специфичные для шаблонов контроля качества (ПКК).
 
-    Хранит информацию о конкретной партии материала и объеме выборки,
-    привязываясь к результату проверки через отношение OneToOne.
+    Определяет, для какого материала предназначен данный шаблон,
+    и сколько образцов необходимо проверить.
     """
 
-    result = models.OneToOneField(
-        'ChecklistResult',
+    template = models.OneToOneField(
+        'Template',
         on_delete=models.CASCADE,
         related_name='qc_metadata',
-        verbose_name='Результат проверки',
+        verbose_name='Шаблон',
     )
     material_uid = models.CharField(
         'UID Материала / Партии', max_length=255, db_index=True
@@ -282,9 +282,8 @@ class QualityControlMetadata(models.Model):
     number_of_samples = models.PositiveIntegerField('Количество образцов', default=1)
 
     class Meta:
-        verbose_name = 'Метаданные контроля качества'
-        verbose_name_plural = 'Метаданные контроля качества'
+        verbose_name = 'Метаданные шаблона ПКК'
+        verbose_name_plural = 'Метаданные шаблонов ПКК'
 
     def __str__(self) -> str:
-        """Возвращает строковое представление метаданных ПКК."""
-        return f'ПКК (Материал: {self.material_uid}, Образцов: {self.number_of_samples}) к анкете {self.result_id}'
+        return f'ПКК (Материал: {self.material_uid}) для шаблона {self.template_id}'
