@@ -425,11 +425,11 @@ class ChecklistResultService:
             return False
 
         handlers = {
-            'CHECKBOX': cls._is_bool_violation,
-            'RADIO': cls._is_bool_violation,
-            'NUMBER': cls._is_numeric_violation,
-            'DATE': cls._is_date_violation,
-            'AUTO_DATE': cls._is_date_violation,
+            FieldTypes.CHECKBOX: cls._is_bool_violation,
+            FieldTypes.RADIO: cls._is_bool_violation,
+            FieldTypes.INTEGER: cls._is_numeric_violation,
+            FieldTypes.DATE: cls._is_date_violation,
+            FieldTypes.AUTO_DATE: cls._is_date_violation,
         }
 
         handler = handlers.get(field.field_type)
