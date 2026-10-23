@@ -26,8 +26,6 @@ class Template(models.Model):
     created_at = models.DateTimeField('Дата создания', auto_now_add=True)
     updated_at = models.DateTimeField('Дата обновления', auto_now=True)
 
-    is_fillable = models.BooleanField('Доступен для заполнения', default=True)
-
     is_draft = models.BooleanField('Черновик', default=False)
     is_deprecated = models.BooleanField('Устаревший', default=False)
 
@@ -71,6 +69,9 @@ class TemplateFieldGroup(models.Model):
         ]
 
     def __str__(self):
+        if self.name == '__DEFAULT__':
+            return f'Без группы - Шаблон {self.template_id}'
+
         return f'{self.name} (Шаблон {self.template_id})'
 
 
@@ -287,3 +288,32 @@ class TemplateQCMetadata(models.Model):
 
     def __str__(self) -> str:
         return f'ПКК (Материал: {self.material_uid}) для шаблона {self.template_id}'
+
+
+class TemplateFieldQCMetadata(models.Model):
+    """Метаданные Листа Контроля Качества (ПКК) для конкретного поля.
+
+    Описывает методологию проверки показателя: критерии нормы (1 сорт),
+    описание брака и инструмент/метод контроля (например, Визуально, Микрометр).
+    Используется исключительно в шаблонах типа QUALITY_CONTROL.
+    """
+
+    field = models.OneToOneField(
+        'TemplateField',
+        on_delete=models.CASCADE,
+        related_name='qc_metadata',
+        verbose_name='Поле шаблона',
+    )
+
+    norm_description = models.TextField('Норма (1 сорт)', blank=True, default='')
+    defect_description = models.TextField('Описание брака', blank=True, default='')
+    control_method = models.CharField(
+        'Метод контроля', max_length=255, blank=True, default=''
+    )
+
+    class Meta:
+        verbose_name = 'Методология контроля поля'
+        verbose_name_plural = 'Методологии контроля полей'
+
+    def __str__(self):
+        return f'Методология для поля: {self.field.name}'

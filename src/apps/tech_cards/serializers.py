@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from apps.tech_cards.constants import MAX_DEPTH, MAX_SECTIONS
+from apps.core.constants import DocumentStatus
+from apps.tech_cards.constants import MAX_DEPTH, MAX_SECTIONS, CardType
 from apps.tech_cards.models import TechCard, TechCardParameter, TechCardSection
 from apps.tech_cards.services import TechCardService
 
@@ -51,6 +52,10 @@ class TechCardSerializer(serializers.ModelSerializer):
     sections = TechCardSectionSerializer(many=True, required=False)
     status_verbose = serializers.CharField(source='get_status_display', read_only=True)
 
+    based_on_id = serializers.IntegerField(
+        write_only=True, required=False, allow_null=True
+    )
+
     class Meta:
         model = TechCard
         fields = [
@@ -61,13 +66,69 @@ class TechCardSerializer(serializers.ModelSerializer):
             'version',
             'status',
             'status_verbose',
+            'card_type',
             'author_uid',
             'created_at',
             'updated_at',
             'sections',
+            'based_on_id',
         ]
         read_only_fields = ['id', 'version', 'status', 'created_at', 'updated_at']
         validators = []
+
+    def validate(self, attrs):
+        """Выполняет бизнес-валидацию, включая защиту веток (форков)."""
+        based_on_id = attrs.pop('based_on_id', None)
+        card_type = attrs.get('card_type', CardType.BASE)
+        author_uid = attrs.get('author_uid', '')
+        equipment_uid = attrs.get('equipment_uid')
+        article = attrs.get('article')
+        equipment_seq_num = attrs.get('equipment_seq_num', '')
+
+        if based_on_id:
+            try:
+                parent_card = TechCard.objects.get(id=based_on_id)
+
+                if (
+                    card_type == CardType.PERSONAL
+                    and parent_card.card_type == CardType.PERSONAL
+                    and parent_card.author_uid != author_uid
+                ):
+                    raise serializers.ValidationError(
+                        {
+                            'non_field_errors': 'Нельзя создать свою версию на основе персональной карты другого оператора. Вносите изменения только в базовый эталон или в свою собственную карту.'
+                        }
+                    )
+
+                if (
+                    card_type == CardType.BASE
+                    and parent_card.card_type == CardType.PERSONAL
+                ):
+                    raise serializers.ValidationError(
+                        {
+                            'non_field_errors': 'Руководитель не может сохранить базовую (эталонную) карту на основе персональной карты оператора.'
+                        }
+                    )
+            except TechCard.DoesNotExist:
+                pass
+
+        if card_type == CardType.PERSONAL:
+            base_exists = TechCard.objects.filter(
+                equipment_uid=equipment_uid,
+                article=article,
+                equipment_seq_num=equipment_seq_num,
+                card_type=CardType.BASE,
+                status=DocumentStatus.ACTIVE,
+            ).exists()
+
+            if not base_exists:
+                raise serializers.ValidationError(
+                    {
+                        'non_field_errors': 'Невозможно сохранить персональные настройки: для данного оборудования и артикула отсутствует базовый эталон.'
+                    }
+                )
+
+        return attrs
 
     def validate_sections(self, sections_data: list) -> list:
         """Валидирует иерархию дерева разделов перед сохранением.

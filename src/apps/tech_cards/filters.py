@@ -34,25 +34,8 @@ class TechCardFilter(django_filters.FilterSet):
         field_name='updated_at', lookup_expr='lte'
     )
 
-    is_archived = django_filters.BooleanFilter(method='filter_is_archived')
+    status = django_filters.ChoiceFilter(choices=DocumentStatus.choices)
 
     class Meta:
         model = TechCard
         fields = ['equipment_uid', 'article', 'equipment_seq_num']
-
-    def filter_is_archived(self, queryset, name, value):
-        """Логика кастомного фильтра статуса.
-
-        Args:
-            queryset (QuerySet): Текущий набор данных.
-            name (str): Имя поля фильтра.
-            value (bool): Значение, переданное клиентом (True/False).
-
-        Returns:
-            QuerySet: Отфильтрованный набор данных.
-        """
-        if value is True:
-            return queryset.filter(status=DocumentStatus.ARCHIVED)
-        if value is False:
-            return queryset.filter(status=DocumentStatus.ACTIVE)
-        return queryset

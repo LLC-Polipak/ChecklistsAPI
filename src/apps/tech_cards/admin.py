@@ -11,7 +11,7 @@ class ReadOnlyAdminMixin:
     для добавления и изменения данных.
     """
 
-    def has_add_permission(self, request):
+    def has_add_permission(self, request, obj=None):
         """Запрещает добавление документа через админку Django."""
         return False
 

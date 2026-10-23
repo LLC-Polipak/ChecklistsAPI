@@ -41,16 +41,10 @@ class TechCardViewSet(
     def get_queryset(self):
         """Формирует набор данных на основе параметров запроса.
 
-        Извлекает параметры статуса и UID оператора, передавая их
-        в кастомный QuerySet для применения бизнес-логики изоляции карт.
-
-        Returns:
-            QuerySet: Оптимизированный и отфильтрованный набор карт.
+        По умолчанию отдает только DocumentStaus.ACTIVE карты. Если передан ?status=archived
+        или ?status=deleted, отдает соответствующие записи.
         """
-        status_filter = DocumentStatus.ACTIVE
-
-        if self.request.query_params.get('is_archived') == 'true':
-            status_filter = DocumentStatus.ARCHIVED
+        status_filter = self.request.query_params.get('status', DocumentStatus.ACTIVE)
 
         operator_uid = self.request.query_params.get('current_operator_uid')
 

@@ -14,6 +14,7 @@ from apps.checklists.models import (
     Template,
     TemplateField,
     TemplateFieldGroup,
+    TemplateFieldQCMetadata,
     TemplateQCMetadata,
 )
 
@@ -29,6 +30,14 @@ class FieldChoiceSerializer(serializers.ModelSerializer):
         fields = ['value', 'order', 'is_violation']
 
 
+class TemplateFieldQCMetadataSerializer(serializers.ModelSerializer):
+    """Сериализатор методологии контроля качества для отдельного поля."""
+
+    class Meta:
+        model = TemplateFieldQCMetadata
+        fields = ['norm_description', 'defect_description', 'control_method']
+
+
 class TemplateFieldSerializer(serializers.ModelSerializer):
     """Сериализовать поле шаблона анкеты.
 
@@ -39,6 +48,8 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
     field_type_display = serializers.CharField(
         source='get_field_type_display', read_only=True
     )
+
+    qc_metadata = TemplateFieldQCMetadataSerializer(required=False, allow_null=True)
 
     class Meta:
         model = TemplateField
@@ -51,6 +62,7 @@ class TemplateFieldSerializer(serializers.ModelSerializer):
             'order',
             'default_value',
             'metadata',
+            'qc_metadata',
             'choices',
         ]
         read_only_fields = ['id']
@@ -184,7 +196,9 @@ class TemplateSerializer(serializers.ModelSerializer):
     Поддерживает вложенную запись групп и полей.
     """
 
-    groups = TemplateFieldGroupSerializer(many=True)
+    groups = TemplateFieldGroupSerializer(many=True, required=False)
+    fields = TemplateFieldSerializer(many=True, required=False, write_only=True)
+
     checklist_type_display = serializers.CharField(
         source='get_checklist_type_display', read_only=True
     )
@@ -202,12 +216,12 @@ class TemplateSerializer(serializers.ModelSerializer):
             'checklist_type',
             'checklist_type_display',
             'is_draft',
-            'is_fillable',
             'is_deprecated',
             'has_results',
             'created_at',
             'updated_at',
             'groups',
+            'fields',
             'qc_metadata',
         ]
         read_only_fields = [
@@ -222,6 +236,21 @@ class TemplateSerializer(serializers.ModelSerializer):
     def get_has_results(self, obj):
         """Проверить существование заполненной анкеты на данный шаблон."""
         return obj.results.exists()
+
+    def to_representation(self, instance):
+        """Очищаем выдачу: вытаскиваем поля из скрытой группы __DEFAULT__ в корень JSON."""
+        data = super().to_representation(instance)
+        groups = data.get('groups', [])
+
+        default_group = next((g for g in groups if g['name'] == '__DEFAULT__'), None)
+
+        if default_group:
+            data['fields'] = default_group['fields']
+            data['groups'] = [g for g in groups if g['name'] != '__DEFAULT__']
+        else:
+            data['fields'] = []
+
+        return data
 
     def validate(self, attrs):
         """Выполнить бизнес-валидацию перед сохранением.
@@ -315,7 +344,8 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         required=False, allow_null=True, default=None
     )
 
-    groups = AnswerGroupSerializer(many=True, allow_empty=True)
+    groups = AnswerGroupSerializer(many=True, allow_empty=True, required=False)
+    answers = AnswerItemSerializer(many=True, allow_empty=True, required=False)
 
     general_comment = serializers.CharField(
         allow_blank=True, required=False, default=''
@@ -328,36 +358,112 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
     def validate(self, attrs):
         """Выполнить главную оркестрацию динамической валидации EAV-структуры.
 
-        Шаги:
-        1. Получить эталонный шаблон.
-        2. Проверить отсутствие пропущенных обязательных полей.
-        3. Запустить проверку типов данных для каждого ответа.
+        Метод выступает фасадным оркестратором. Детализация вынесена в приватные методы
+        для снижения цикломатической сложности и соблюдения SRP.
         """
-        groups_data = attrs.get('groups', [])
-        is_draft = attrs.get('is_draft', False)
-        is_completed = attrs.get('is_completed')
+        # 1. Приведение флагов черновика к единому стандарту
+        self._normalize_status_flags(attrs)
 
-        if is_draft:
-            attrs['is_completed'] = False
-        else:
-            if is_completed is None:
-                attrs['is_completed'] = True
-
+        # 2. Получение эталонного шаблона
         template = self._get_active_template(attrs)
 
+        # 3. Интеграция рутовых ответов (без группы) в системную группу
+        self._inject_root_answers(template, attrs)
+
+        # 4. Проверка метаданных контроля качества
+        self._validate_qc_metadata(template, attrs)
+
+        # 5. Картирование полей шаблона
+        template_fields = self._map_template_fields(template)
+
+        # 6. Проверка структуры присланных ответов (принадлежность полей и групп)
+        groups_data = attrs.get('groups', [])
+        answers_data = self._extract_and_validate_answers_structure(
+            groups_data, template_fields
+        )
+
+        # 7. Детальная проверка значений EAV
+        is_draft = attrs.get('is_draft', False)
+        self._check_missing_required_fields(template_fields, answers_data, is_draft)
+
+        validated_answers = self._process_and_validate_answers(
+            template_fields, answers_data, is_draft
+        )
+
+        attrs.pop('groups', None)
+        attrs.pop('answers', None)
+        attrs.pop('equipment_uid', None)
+        attrs.pop('checklist_type', None)
+        attrs.pop('material_uid', None)
+
+        attrs['template'] = template
+        attrs['validated_answers'] = validated_answers
+        return attrs
+
+    def _normalize_status_flags(self, attrs: dict) -> None:
+        """Определяет и устанавливает корректные статусы для черновика и чистовика."""
+        if attrs.get('is_draft', False):
+            attrs['is_completed'] = False
+        elif attrs.get('is_completed') is None:
+            attrs['is_completed'] = True
+
+    def _inject_root_answers(self, template: Template, attrs: dict) -> None:
+        """Интегрирует плоские ответы в системную скрытую группу __DEFAULT__."""
+        root_answers = attrs.get('answers', [])
+        if not root_answers:
+            return
+
+        default_group = template.groups.filter(name='__DEFAULT__').first()
+        if not default_group:
+            raise ValidationError({'answers': 'В данном шаблоне нет полей без группы.'})
+
+        groups_data = attrs.setdefault('groups', [])
+        groups_data.append({'group_id': default_group.id, 'answers': root_answers})
+
+    def _validate_qc_metadata(self, template: Template, attrs: dict) -> None:
+        """Проверяет корректность метаданных для листов контроля качества (ПКК)."""
+        if template.checklist_type == ChecklistTypes.QUALITY_CONTROL:
+            if not attrs.get('material_uid'):
+                raise ValidationError(
+                    {
+                        'material_uid': 'Для листов контроля качества (ПКК) обязательно нужно указать material_uid в корне запроса.'
+                    }
+                )
+        else:
+            # Сбрасываем метаданные для обычных чек-листов
+            attrs['qc_metadata'] = None
+
+    def _map_template_fields(self, template: Template) -> dict:
+        """Создает плоский словарь всех полей шаблона для быстрого доступа по ID."""
         template_fields = {}
         for group in template.groups.all():
-            for f in group.fields.all():
-                template_fields[str(f.id)] = f
+            for field in group.fields.all():
+                template_fields[str(field.id)] = field
+        return template_fields
 
+    def _extract_and_validate_answers_structure(
+        self, groups_data: list, template_fields: dict
+    ) -> dict:
+        """Извлекает ответы и проверяет их структурную принадлежность к шаблону и группам.
+
+        Args:
+            groups_data (list): Список групп с ответами из запроса.
+            template_fields (dict): Плоский словарь полей эталонного шаблона.
+
+        Returns:
+            dict: Словарь извлеченных ответов в формате {field_id: answer_obj}.
+
+        Raises:
+            ValidationError: Если найдены поля, не принадлежащие шаблону или группе.
+        """
         answers_data = {}
         errors = {}
 
         for group_item in groups_data:
-            g_id = group_item['group_id']
+            g_id = group_item.get('group_id')
 
-            for ans_obj in group_item['answers']:
-                f_id = str(ans_obj['field_id'])
+            for ans_obj in group_item.get('answers', []):
+                f_id = str(ans_obj.get('field_id'))
 
                 if f_id not in template_fields:
                     errors[f_id] = 'Поле не принадлежит этому шаблону.'
@@ -376,19 +482,7 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
         if errors:
             raise ValidationError(errors)
 
-        self._check_missing_required_fields(template_fields, answers_data, is_draft)
-        validated_answers = self._process_and_validate_answers(
-            template_fields, answers_data, is_draft
-        )
-
-        attrs.pop('groups', None)
-        attrs.pop('equipment_uid', None)
-        attrs.pop('checklist_type', None)
-        attrs.pop('material_uid', None)
-
-        attrs['template'] = template
-        attrs['validated_answers'] = validated_answers
-        return attrs
+        return answers_data
 
     def _get_active_template(self, attrs):
         """Извлечь активный шаблон из базы данных.
@@ -408,11 +502,6 @@ class ChecklistResultCreateSerializer(serializers.Serializer):
                 raise ValidationError(
                     'Активный шаблон для данного оборудования и материала не найден.'
                 )
-
-        if not template.is_fillable:
-            raise ValidationError(
-                'Данный шаблон является справочным документом и не предназначен для заполнения.'
-            )
 
         return template
 
@@ -636,10 +725,14 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
     equipment_uid = serializers.CharField(
         source='template.equipment_uid', read_only=True
     )
+    material_uid = serializers.CharField(
+        source='template.qc_metadata.material_uid', read_only=True
+    )
 
     signatures = ChecklistSignatureSerializer(many=True, read_only=True)
 
     groups = serializers.SerializerMethodField()
+    answers = serializers.SerializerMethodField()
     attachments = ChecklistAttachmentSerializer(many=True, read_only=True)
 
     class Meta:
@@ -653,6 +746,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'source_service',
             'checklist_type',
             'checklist_type_display',
+            'material_uid',
             'shift_number',
             'shift_time',
             'is_draft',
@@ -663,6 +757,7 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             'created_at',
             'updated_at',
             'signatures',
+            'answers',
             'groups',
             'attachments',
         ]
@@ -673,6 +768,8 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
         groups_map = {}
         for ans in obj.answers.all():
             group = ans.field.group
+            if group.name == '__DEFAULT__':
+                continue
             if group.id not in groups_map:
                 groups_map[group.id] = {
                     'group_id': group.id,
@@ -689,6 +786,16 @@ class ChecklistResultListSerializer(serializers.ModelSerializer):
             g.pop('order', None)
 
         return sorted_groups
+
+    @extend_schema_field(ChecklistAnswerSerializer(many=True))
+    def get_answers(self, obj):
+        """Возвращает ответы, принадлежащие скрытой группе __DEFAULT__."""
+        default_answers = [
+            ans for ans in obj.answers.all() if ans.field.group.name == '__DEFAULT__'
+        ]
+
+        serializer = ChecklistAnswerSerializer(default_answers, many=True)
+        return serializer.data
 
 
 class TemplateCloneSerializer(serializers.Serializer):

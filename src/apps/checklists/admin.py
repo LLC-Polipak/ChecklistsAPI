@@ -13,6 +13,7 @@ from apps.checklists.models import (
     Template,
     TemplateField,
     TemplateFieldGroup,
+    TemplateFieldQCMetadata,
     TemplateQCMetadata,
 )
 from apps.checklists.services import TemplateService
@@ -24,6 +25,15 @@ class TemplateQCMetadataInline(nested_admin.NestedStackedInline):
     model = TemplateQCMetadata
     extra = 0
     can_delete = False
+
+
+class TemplateFieldQCMetadataInline(nested_admin.NestedStackedInline):
+    """Интерфейс для методологии контроля качества поля (только для ПКК)."""
+
+    model = TemplateFieldQCMetadata
+    extra = 0
+    can_delete = False
+    classes = ['collapse']
 
 
 class FieldChoiceInline(nested_admin.NestedTabularInline):
@@ -40,7 +50,7 @@ class TemplateFieldInline(nested_admin.NestedTabularInline):
     model = TemplateField
     extra = 0
     fields = ('name', 'field_type', 'is_required', 'order', 'default_value', 'metadata')
-    inlines = [FieldChoiceInline]
+    inlines = [TemplateFieldQCMetadataInline, FieldChoiceInline]
 
     formfield_overrides = {
         models.TextField: {
@@ -82,7 +92,6 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
         'id',
         'name',
         'checklist_type',
-        'get_is_fillable',
         'get_is_draft',
         'get_is_deprecated',
         'created_at',
@@ -90,7 +99,6 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
     )
     list_filter = (
         'is_draft',
-        'is_fillable',
         'checklist_type',
         'is_deprecated',
         'created_at',
@@ -107,15 +115,6 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
 
     actions = [clone_templates_action]
 
-    @admin.display(description='Заполнение', ordering='is_fillable')
-    def get_is_fillable(self, obj):
-        """Форматирует отображение статуса возможности заполнения чек-листа по шаблону."""
-        if obj.is_fillable:
-            return mark_safe('<span style="color: #16A34A;">Доступно✍</span>')
-        return mark_safe(
-            '<span style="color: #6B7280; font-style: italic;">Справочник📋</span>'
-        )
-
     @admin.display(description='Черновик', ordering='is_draft')
     def get_is_draft(self, obj):
         """Форматирует отображение статуса черновика шаблона."""
@@ -129,8 +128,8 @@ class TemplateAdmin(nested_admin.NestedModelAdmin):
     def get_is_deprecated(self, obj):
         """Форматирует отображение статуса неактуальности шаблона."""
         if obj.is_deprecated:
-            return mark_safe('<span style="color: #9CA3AF;">Устарел❌(В архиве)</span>')
-        return mark_safe('<span style="color: #16A34A;">Актуальный</span>')
+            return mark_safe('<span style="color: #9CA3AF;">Устарел⬇(В архиве)</span>')
+        return mark_safe('<span style="color: #16A34A;">Актуальный✅</span>')
 
 
 @admin.register(TemplateFieldGroup)
@@ -305,7 +304,13 @@ class ChecklistAnswerAdmin(admin.ModelAdmin):
     по всем анкетам сразу.
     """
 
-    list_display = ('id', 'get_field_name', 'value', 'is_violation', 'get_result_user')
+    list_display = (
+        'id',
+        'get_field_name',
+        'value',
+        'get_is_violation',
+        'get_result_user',
+    )
     list_filter = ('is_violation', 'field__field_type')
     search_fields = (
         'value',
@@ -315,12 +320,21 @@ class ChecklistAnswerAdmin(admin.ModelAdmin):
         'result__external_id',
     )
     raw_id_fields = ('result', 'field')
-    readonly_fields = ('result', 'field', 'value', 'comment', 'is_violation')
+    readonly_fields = ('result', 'field', 'value', 'comment', 'get_is_violation')
 
     @admin.display(description='Поле', ordering='field__name')
     def get_field_name(self, obj):
         """Возвращает имя поля, к которому привязан ответ."""
         return obj.field.name
+
+    @admin.display(description='Отклонения', ordering='has_violations')
+    def get_is_violation(self, obj):
+        """Метод для понятной простому человеку отрисовки отклонений в анкете."""
+        if obj.is_violation:
+            return mark_safe(
+                '<span style="color: #DC2626; font-weight: bold;">⚠️ Да</span>'
+            )
+        return mark_safe('<span style="color: #16A34A;">Нет</span>')
 
     @admin.display(description='Пользователь', ordering='result__user_uid')
     def get_result_user(self, obj):

@@ -39,7 +39,6 @@ class TemplateFilter(django_filters.FilterSet):
             'checklist_type',
             'is_deprecated',
             'is_draft',
-            'is_fillable',
         ]
 
     def filter_end_of_day(self, queryset, name, value):
@@ -57,6 +56,9 @@ class ChecklistResultFilter(django_filters.FilterSet):
 
     equipment_uid = django_filters.CharFilter(
         field_name='template__equipment_uid', lookup_expr='exact'
+    )
+    material_uid = django_filters.CharFilter(
+        field_name='template__qc_metadata__material_uid', lookup_expr='exact'
     )
 
     created_date_from = django_filters.DateFilter(

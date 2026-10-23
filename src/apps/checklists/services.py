@@ -36,6 +36,8 @@ class TemplateService:
         2. Иерархия (Группы -> Поля -> Варианты выбора) сохраняется атомарно.
         """
         groups_data = validated_data.pop('groups', [])
+        root_fields_data = validated_data.pop('fields', [])
+
         is_draft = validated_data.get('is_draft', False)
         qc_metadata_data = validated_data.pop('qc_metadata', None)
 
@@ -48,7 +50,7 @@ class TemplateService:
             )
 
         template = Template.objects.create(**validated_data)
-        cls._save_hierarchy(template, groups_data)
+        cls._save_hierarchy(template, groups_data, root_fields_data)
 
         if qc_metadata_data:
             TemplateQCMetadata.objects.create(template=template, **qc_metadata_data)
@@ -65,123 +67,21 @@ class TemplateService:
         2. Если анкет нет -> обновляет текущий шаблон напрямую.
         """
         groups_data = validated_data.pop('groups', None)
+        root_fields_data = validated_data.pop('fields', None)
         qc_metadata_data = validated_data.pop('qc_metadata', None)
 
         if instance.results.exists():
             return cls._create_new_version_from_existing(
-                instance, validated_data, groups_data, qc_metadata_data
+                instance,
+                validated_data,
+                groups_data,
+                qc_metadata_data,
+                root_fields_data,
             )
 
         return cls._update_template_in_place(
-            instance, validated_data, groups_data, qc_metadata_data
+            instance, validated_data, groups_data, qc_metadata_data, root_fields_data
         )
-
-    @classmethod
-    def _create_new_version_from_existing(
-        cls,
-        instance: Template,
-        validated_data: dict,
-        groups_data: list | None,
-        qc_metadata_data: dict | None,
-    ) -> Template:
-        """Создает новую версию шаблона для сохранения историчности анкет."""
-        new_data = {
-            'equipment_uid': instance.equipment_uid,
-            'checklist_type': instance.checklist_type,
-            'name': validated_data.get('name', instance.name),
-            'is_draft': validated_data.get('is_draft', instance.is_draft),
-            'is_fillable': validated_data.get('is_fillable', instance.is_fillable),
-        }
-
-        instance.is_deprecated = True
-        instance.save(update_fields=['is_deprecated'])
-
-        if not new_data['is_draft']:
-            mat_uid = (
-                qc_metadata_data.get('material_uid')
-                if qc_metadata_data
-                else (
-                    instance.qc_metadata.material_uid
-                    if hasattr(instance, 'qc_metadata')
-                    else None
-                )
-            )
-            Template.objects.deprecate_all(
-                new_data['equipment_uid'], new_data['checklist_type'], mat_uid
-            )
-
-        new_template = Template.objects.create(**new_data)
-
-        if qc_metadata_data:
-            from apps.checklists.models import TemplateQCMetadata
-
-            TemplateQCMetadata.objects.create(template=new_template, **qc_metadata_data)
-        elif hasattr(instance, 'qc_metadata'):
-            from apps.checklists.models import TemplateQCMetadata
-
-            TemplateQCMetadata.objects.create(
-                template=new_template,
-                material_uid=instance.qc_metadata.material_uid,
-                number_of_samples=instance.qc_metadata.number_of_samples,
-            )
-
-        if groups_data is not None:
-            cls._save_hierarchy(new_template, groups_data)
-        else:
-            cls._copy_hierarchy(instance, new_template)
-
-        return new_template
-
-    @classmethod
-    def _update_template_in_place(
-        cls,
-        instance: Template,
-        validated_data: dict,
-        groups_data: list | None,
-        qc_metadata_data: dict | None,
-    ) -> Template:
-        """Обновляет шаблон напрямую, если по нему еще нет заполненных данных."""
-        was_draft = instance.is_draft
-
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-
-        if qc_metadata_data is not None:
-            from apps.checklists.models import TemplateQCMetadata
-
-            if hasattr(instance, 'qc_metadata'):
-                instance.qc_metadata.material_uid = qc_metadata_data.get(
-                    'material_uid', instance.qc_metadata.material_uid
-                )
-                instance.qc_metadata.number_of_samples = qc_metadata_data.get(
-                    'number_of_samples', instance.qc_metadata.number_of_samples
-                )
-                instance.qc_metadata.save()
-            else:
-                TemplateQCMetadata.objects.create(template=instance, **qc_metadata_data)
-
-        is_draft = instance.is_draft
-
-        if was_draft and not is_draft:
-            mat_uid = (
-                instance.qc_metadata.material_uid
-                if hasattr(instance, 'qc_metadata')
-                else None
-            )
-            Template.objects.deprecate_all(
-                instance.equipment_uid,
-                instance.checklist_type,
-                mat_uid,
-                exclude_id=instance.id,
-            )
-
-        instance.save()
-
-        if groups_data is not None:
-            instance.groups.all().delete()
-            cls._save_hierarchy(instance, groups_data)
-
-        return instance
 
     @classmethod
     @transaction.atomic
@@ -216,7 +116,6 @@ class TemplateService:
             name=f'{instance.name} (Копия)',
             equipment_uid=new_equipment_uid,
             checklist_type=instance.checklist_type,
-            is_fillable=instance.is_fillable,
             is_draft=False,
             is_deprecated=False,
         )
@@ -232,15 +131,46 @@ class TemplateService:
         return new_template
 
     @classmethod
-    def _save_hierarchy(cls, template: Template, groups_data: list) -> None:
-        """Выполнить сохранение дерева структуры шаблона."""
+    def _save_hierarchy(
+        cls, template: Template, groups_data: list, root_fields_data: list | None
+    ) -> None:
+        """Сохранение структуры. Создает системную группу __DEFAULT__ для плоских полей."""
+        is_qc = template.checklist_type == 'QUALITY_CONTROL'
+
         for group_data in groups_data:
             fields_data = group_data.pop('fields', [])
             group = TemplateFieldGroup.objects.create(template=template, **group_data)
 
             for field_data in fields_data:
                 choices_data = field_data.pop('choices', [])
+                field_qc_meta = field_data.pop('qc_metadata', None)
+
                 field = TemplateField.objects.create(group=group, **field_data)
+
+                if is_qc and field_qc_meta:
+                    from apps.checklists.models import TemplateFieldQCMetadata
+
+                    TemplateFieldQCMetadata.objects.create(field=field, **field_qc_meta)
+
+                if choices_data:
+                    FieldChoice.objects.bulk_create(
+                        [FieldChoice(field=field, **c) for c in choices_data]
+                    )
+
+        if root_fields_data:
+            default_group = TemplateFieldGroup.objects.create(
+                template=template, name='__DEFAULT__', order=0
+            )
+            for field_data in root_fields_data:
+                choices_data = field_data.pop('choices', [])
+                field_qc_meta = field_data.pop('qc_metadata', None)
+
+                field = TemplateField.objects.create(group=default_group, **field_data)
+
+                if is_qc and field_qc_meta:
+                    from apps.checklists.models import TemplateFieldQCMetadata
+
+                    TemplateFieldQCMetadata.objects.create(field=field, **field_qc_meta)
 
                 if choices_data:
                     FieldChoice.objects.bulk_create(
@@ -262,16 +192,134 @@ class TemplateService:
             for old_field in old_fields:
                 old_choices = list(old_field.choices.all())
 
+                old_qc_meta = getattr(old_field, 'qc_metadata', None)
+
                 old_field.pk = None
                 old_field.group = old_group
                 old_field.save()
 
+                if old_qc_meta:
+                    old_qc_meta.pk = None
+                    old_qc_meta.field = old_field
+                    old_qc_meta.save()
+
                 if old_choices:
                     new_choices = [
-                        FieldChoice(field=old_field, value=c.value, order=c.order)
+                        FieldChoice(
+                            field=old_field,
+                            value=c.value,
+                            order=c.order,
+                            is_violation=c.is_violation,
+                        )
                         for c in old_choices
                     ]
                     FieldChoice.objects.bulk_create(new_choices)
+
+    @classmethod
+    def _create_new_version_from_existing(
+        cls,
+        instance: Template,
+        validated_data: dict,
+        groups_data: list | None,
+        qc_metadata_data: dict | None,
+        root_fields_data: list | None,
+    ) -> Template:
+        """Создает новую версию шаблона для сохранения историчности анкет."""
+        new_data = {
+            'equipment_uid': instance.equipment_uid,
+            'checklist_type': instance.checklist_type,
+            'name': validated_data.get('name', instance.name),
+            'is_draft': validated_data.get('is_draft', instance.is_draft),
+        }
+
+        instance.is_deprecated = True
+        instance.save(update_fields=['is_deprecated'])
+
+        if not new_data['is_draft']:
+            mat_uid = (
+                qc_metadata_data.get('material_uid')
+                if qc_metadata_data
+                else (
+                    instance.qc_metadata.material_uid
+                    if hasattr(instance, 'qc_metadata')
+                    else None
+                )
+            )
+            Template.objects.deprecate_all(
+                new_data['equipment_uid'], new_data['checklist_type'], mat_uid
+            )
+
+        new_template = Template.objects.create(**new_data)
+
+        if qc_metadata_data:
+            from apps.checklists.models import TemplateQCMetadata
+
+            TemplateQCMetadata.objects.create(template=new_template, **qc_metadata_data)
+        elif hasattr(instance, 'qc_metadata'):
+            from apps.checklists.models import TemplateQCMetadata
+
+            TemplateQCMetadata.objects.create(
+                template=new_template,
+                material_uid=instance.qc_metadata.material_uid,
+                number_of_samples=instance.qc_metadata.number_of_samples,
+            )
+
+        if groups_data is not None or root_fields_data is not None:
+            cls._save_hierarchy(new_template, groups_data or [], root_fields_data)
+        else:
+            cls._copy_hierarchy(instance, new_template)
+
+        return new_template
+
+    @classmethod
+    def _update_template_in_place(
+        cls,
+        instance: Template,
+        validated_data: dict,
+        groups_data: list | None,
+        qc_metadata_data: dict | None,
+        root_fields_data: list | None,
+    ) -> Template:
+        """Обновляет шаблон напрямую, если по нему еще нет заполненных данных."""
+        was_draft = instance.is_draft
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        if qc_metadata_data is not None:
+            if hasattr(instance, 'qc_metadata'):
+                instance.qc_metadata.material_uid = qc_metadata_data.get(
+                    'material_uid', instance.qc_metadata.material_uid
+                )
+                instance.qc_metadata.number_of_samples = qc_metadata_data.get(
+                    'number_of_samples', instance.qc_metadata.number_of_samples
+                )
+                instance.qc_metadata.save()
+            else:
+                TemplateQCMetadata.objects.create(template=instance, **qc_metadata_data)
+
+        is_draft = instance.is_draft
+
+        if was_draft and not is_draft:
+            mat_uid = (
+                instance.qc_metadata.material_uid
+                if hasattr(instance, 'qc_metadata')
+                else None
+            )
+            Template.objects.deprecate_all(
+                instance.equipment_uid,
+                instance.checklist_type,
+                mat_uid,
+                exclude_id=instance.id,
+            )
+
+        instance.save()
+
+        if groups_data is not None or root_fields_data is not None:
+            instance.groups.all().delete()
+            cls._save_hierarchy(instance, groups_data or [], root_fields_data)
+
+        return instance
 
 
 class ChecklistResultService:
